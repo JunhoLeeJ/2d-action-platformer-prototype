@@ -127,6 +127,10 @@
     <div><b>Z</b> : 점프 (이단 점프 가능)</div>
     <div><b>X</b> : 대쉬 (짧은 무적)</div>
     <div><b>C</b> : 근접 공격</div>
+    <div style="margin-top:6px; font-size:11px; opacity:0.85;">
+      회색 발판: 완전 고정 (아래에서도 못 뚫음)<br>
+      청록색 발판: 아래에서 점프로 관통 가능
+    </div>
   </div>
   <div id="respawnMsg">Respawn...</div>
 </div>
@@ -164,7 +168,8 @@ const CONFIG = {
   RESPAWN_DELAY: 1.2,        // 사망 후 리스폰까지 대기시간 (sec)
 
   // --- 적 (포탑) ---
-  TURRET_FIRE_INTERVAL: 2.2, // 포탑 발사 주기 (sec)
+  TURRET_FIRE_INTERVAL: 2.2, // 포탑 발사 주기 (sec, 예고 시작부터 다음 예고 시작까지)
+  TURRET_TELEGRAPH_DURATION: 0.5, // 발사 전 "예고" 시간 (sec) - 이 동안 포탑이 경고 표시를 보여줌
   TURRET_MAX_HP: 3,          // 포탑 체력 (근접 공격 3회에 파괴)
   PROJECTILE_SPEED: 260,     // 투사체 속도 (px/sec) - 낮을수록 피하기 쉬움
   PROJECTILE_RADIUS: 8,
@@ -207,10 +212,15 @@ function circleRectOverlap(cx, cy, r, rect) {
 /* --------------------------- 레벨 지형 --------------------------- */
 const SPAWN_POINT = { x: 40, y: 400 };
 
-const solids = [
+// 완전 고정형 플랫폼: 모든 방향에서 막힘 (아래에서 점프해도 관통 불가 - 머리가 부딪힘)
+const solidPlatforms = [
   { x: 0,   y: 500, w: 960, h: 40 },  // 바닥
+  { x: 420, y: 300, w: 160, h: 20 },  // 플랫폼 2 (가운데, 고정형)
+];
+
+// 관통형(원웨이) 플랫폼: 위에서 떨어질 때만 착지, 아래에서 위로 점프할 땐 그냥 통과
+const oneWayPlatforms = [
   { x: 150, y: 390, w: 160, h: 20 },  // 플랫폼 1
-  { x: 420, y: 300, w: 160, h: 20 },  // 플랫폼 2 (가운데, 조금 더 높음)
   { x: 700, y: 390, w: 160, h: 20 },  // 플랫폼 3
 ];
 
@@ -243,9 +253,11 @@ let enemyIdCounter = 0;
 function makeTurret(x, y) {
   return {
     id: enemyIdCounter++,
+    spawnX: x, spawnY: y,
     x, y, w: 36, h: 40,
     hp: CONFIG.TURRET_MAX_HP,
     fireTimer: CONFIG.TURRET_FIRE_INTERVAL * Math.random(), // 살짝 랜덤 오프셋
+    telegraphing: false,
     alive: true,
     flashTimer: 0,
   };
@@ -256,6 +268,19 @@ const enemies = [
   makeTurret(480, 300 - 40),   // 가운데 플랫폼 위
   makeTurret(760, 390 - 40),   // 오른쪽 플랫폼 위
 ];
+
+// 플레이어 리스폰 시 적도 처음 상태(체력/생존 여부/발사 타이머)로 전부 되돌림
+function resetEnemies() {
+  for (const enemy of enemies) {
+    enemy.x = enemy.spawnX;
+    enemy.y = enemy.spawnY;
+    enemy.hp = CONFIG.TURRET_MAX_HP;
+    enemy.alive = true;
+    enemy.telegraphing = false;
+    enemy.fireTimer = CONFIG.TURRET_FIRE_INTERVAL * Math.random();
+    enemy.flashTimer = 0;
+  }
+}
 
 const projectiles = []; // {x,y,vx,vy,r}
 
@@ -296,6 +321,7 @@ function respawnPlayer() {
   player.dashTimer = 0;
   player.attackState = "idle";
   projectiles.length = 0;
+  resetEnemies();
   gameState = "playing";
 }
 
@@ -359,10 +385,10 @@ function updatePlayer(dt) {
     if (player.attackTimer <= 0) player.attackState = "idle";
   }
 
-  // --- 이동 적용 + 충돌 처리 (X축) ---
+  // --- 이동 적용 + 충돌 처리 (X축, 고정형 플랫폼만 - 원웨이는 좌우로 막지 않음) ---
   player.x += player.vx * dt;
   player.x = clamp(player.x, 0, W - player.w);
-  for (const s of solids) {
+  for (const s of solidPlatforms) {
     if (rectsOverlap(player, s)) {
       if (player.vx > 0) player.x = s.x - player.w;
       else if (player.vx < 0) player.x = s.x + s.w;
@@ -371,9 +397,12 @@ function updatePlayer(dt) {
   }
 
   // --- 이동 적용 + 충돌 처리 (Y축) ---
+  const prevBottom = player.y + player.h; // 이번 프레임에 움직이기 전 발 바닥 위치
   player.y += player.vy * dt;
   player.onGround = false;
-  for (const s of solids) {
+
+  // 고정형 플랫폼: 위에서 착지 + 아래에서 점프 시 머리가 부딪힘 (양방향 모두 막힘)
+  for (const s of solidPlatforms) {
     if (rectsOverlap(player, s)) {
       if (player.vy > 0) {
         player.y = s.y - player.h;
@@ -384,6 +413,21 @@ function updatePlayer(dt) {
         player.y = s.y + s.h;
         player.vy = 0;
       }
+    }
+  }
+
+  // 원웨이(관통형) 플랫폼: 오직 "위에서 떨어져 착지"할 때만 막힘.
+  // 아래에서 위로 통과하거나(vy < 0), 이미 플랫폼 아래에 있던 경우는 그대로 통과시킴.
+  for (const p of oneWayPlatforms) {
+    const horizontallyOverlapping = player.x + player.w > p.x && player.x < p.x + p.w;
+    if (!horizontallyOverlapping) continue;
+    const newBottom = player.y + player.h;
+    const wasAboveSurface = prevBottom <= p.y + 0.5;
+    if (player.vy >= 0 && wasAboveSurface && newBottom >= p.y) {
+      player.y = p.y - player.h;
+      player.vy = 0;
+      player.onGround = true;
+      player.jumpsUsed = 0;
     }
   }
 
@@ -416,8 +460,13 @@ function updateEnemies(dt) {
     if (gameState !== "playing") continue;
 
     enemy.fireTimer -= dt;
+
+    // 발사 CONFIG.TURRET_TELEGRAPH_DURATION 초 전부터 "공격 예고" 상태로 전환 (시각적 경고)
+    enemy.telegraphing = enemy.fireTimer <= CONFIG.TURRET_TELEGRAPH_DURATION;
+
     if (enemy.fireTimer <= 0) {
       enemy.fireTimer = CONFIG.TURRET_FIRE_INTERVAL;
+      enemy.telegraphing = false;
       const ex = enemy.x + enemy.w / 2, ey = enemy.y + enemy.h / 2;
       const px = player.x + player.w / 2, py = player.y + player.h / 2;
       const dx = px - ex, dy = py - ey;
@@ -481,19 +530,29 @@ function draw() {
   ctx.fillStyle = "#2b2f3a";
   ctx.fillRect(0, 0, W, H);
 
-  // 지형
-  for (const s of solids) drawRect(s, "#555b6e");
+  // 지형 - 고정형(완전 차단)은 회색, 원웨이(관통형)는 청록색 + 상단에 밝은 선으로 구분
+  for (const s of solidPlatforms) drawRect(s, "#555b6e");
+  for (const p of oneWayPlatforms) {
+    drawRect(p, "#3f7068");
+    ctx.fillStyle = "#8de6cf";
+    ctx.fillRect(p.x, p.y, p.w, 3); // 위쪽 밝은 라인 = "위에서만 착지 가능" 표시
+  }
 
   // 적
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
-    const color = enemy.flashTimer > 0 ? "#ffffff" : "#b23b3b";
+    let color = enemy.flashTimer > 0 ? "#ffffff" : "#b23b3b";
+    // 공격 예고 중에는 빠르게 밝아졌다 어두워지는 색으로 경고
+    if (enemy.telegraphing) {
+      const pulse = (Math.sin(performance.now() / 60) + 1) / 2; // 0~1
+      color = pulse > 0.5 ? "#ffb300" : "#ff6f3c";
+    }
     drawRect(enemy, color);
-    // 포탑 "눈" - 플레이어 방향을 향하는 작은 원
-    ctx.fillStyle = "#241010";
+    // 포탑 "눈" - 플레이어 방향을 향하는 작은 원, 예고 중엔 커지고 밝아짐
+    ctx.fillStyle = enemy.telegraphing ? "#fff59d" : "#241010";
     ctx.beginPath();
     const cx = enemy.x + enemy.w / 2, cy = enemy.y + enemy.h / 2;
-    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+    ctx.arc(cx, cy, enemy.telegraphing ? 9 : 6, 0, Math.PI * 2);
     ctx.fill();
     // 체력 pip
     const pipW = 8, gap = 3;
