@@ -167,6 +167,7 @@ const CONFIG = {
   PLAYER_MAX_HP: 5,
   HIT_INVINCIBILITY_DURATION: 0.6, // 피격 후 무적시간 (sec)
   RESPAWN_DELAY: 1.2,        // 사망 후 리스폰까지 대기시간 (sec)
+  PIT_FALL_BUFFER: 60,       // 낙사 판정 여유값 (px) - 화면 아래로 이 정도 더 떨어지면 사망 처리
 
   // --- 적 (포탑) ---
   TURRET_FIRE_INTERVAL: 2.2, // 포탑 발사 주기 (sec, 예고 시작부터 다음 예고 시작까지)
@@ -218,9 +219,30 @@ function circleRectOverlap(cx, cy, r, rect) {
 const WORLD_WIDTH = 3840; // 캔버스 너비(960)의 4배 - 가로 스크롤 레벨
 const SPAWN_POINT = { x: 40, y: 400 };
 
+const GROUND_Y = 500, GROUND_H = 40;
+
+// 바닥에 뚫어놓은 낙사 구간 (이 x 범위에는 바닥이 없음 - 떨어지면 사망)
+const GROUND_GAPS = [
+  { x: 900,  w: 100 },
+  { x: 2350, w: 120 },
+];
+
+// 위 GROUND_GAPS를 뺀 나머지 구간으로 바닥 조각들을 만듦
+function buildGroundSegments() {
+  const segments = [];
+  const gaps = [...GROUND_GAPS].sort((a, b) => a.x - b.x);
+  let cursor = 0;
+  for (const gap of gaps) {
+    if (gap.x > cursor) segments.push({ x: cursor, y: GROUND_Y, w: gap.x - cursor, h: GROUND_H });
+    cursor = gap.x + gap.w;
+  }
+  if (cursor < WORLD_WIDTH) segments.push({ x: cursor, y: GROUND_Y, w: WORLD_WIDTH - cursor, h: GROUND_H });
+  return segments;
+}
+
 // 완전 고정형 플랫폼: 모든 방향에서 막힘 (아래에서 점프해도 관통 불가 - 머리가 부딪힘)
 const solidPlatforms = [
-  { x: 0,    y: 500, w: WORLD_WIDTH, h: 40 }, // 바닥 (레벨 전체를 가로지름)
+  ...buildGroundSegments(), // 바닥 (낙사 구간 제외)
   { x: 420,  y: 300, w: 160, h: 20 },
   { x: 1300, y: 320, w: 140, h: 20 },
   { x: 1780, y: 260, w: 120, h: 20 },
@@ -277,6 +299,7 @@ function makeTurret(x, y) {
     telegraphing: false,
     alive: true,
     flashTimer: 0,
+    hasBeenVisible: false, // 카메라 화면 안에 한 번이라도 들어온 적 있는지 (아직 없으면 발사 금지)
   };
 }
 
@@ -303,6 +326,7 @@ function resetEnemies() {
     enemy.telegraphing = false;
     enemy.fireTimer = CONFIG.TURRET_FIRE_INTERVAL * Math.random();
     enemy.flashTimer = 0;
+    enemy.hasBeenVisible = false;
   }
 }
 
@@ -336,6 +360,11 @@ function updateCamera(dt) {
   // 레벨 경계를 벗어나지 않도록 고정
   camera.x = clamp(camera.x, 0, WORLD_WIDTH - W);
   camera.y = 0; // 세로 스크롤 없음 (레벨 높이 = 캔버스 높이)
+}
+
+// 현재 카메라 뷰포트(화면) 안에 해당 월드 오브젝트가 보이는지 여부
+function isInCameraView(rect) {
+  return rectsOverlap(rect, { x: camera.x, y: camera.y, w: W, h: H });
 }
 
 /* --------------------------- 업데이트 로직 --------------------------- */
@@ -486,8 +515,8 @@ function updatePlayer(dt) {
     }
   }
 
-  // 화면 밖으로 떨어지는 안전장치
-  if (player.y > H + 200) {
+  // 낙사 판정: 바닥 구멍으로 떨어져 화면 아래로 일정 거리 이상 벗어나면 사망
+  if (player.y > H + CONFIG.PIT_FALL_BUFFER) {
     triggerDeath();
   }
 }
@@ -513,6 +542,15 @@ function updateEnemies(dt) {
     if (enemy.flashTimer > 0) enemy.flashTimer -= dt;
     if (!enemy.alive) continue;
     if (gameState !== "playing") continue;
+
+    // 화면에 한 번이라도 들어온 적이 있는지 기록 (한 번 보이고 나면 이후 화면 밖으로 나가도 계속 유지)
+    if (!enemy.hasBeenVisible && isInCameraView(enemy)) {
+      enemy.hasBeenVisible = true;
+    }
+
+    // 아직 한 번도 화면에 보인 적 없는 포탑은 대기 상태 - 타이머도 멈춰있고 발사도 안 함.
+    // (화면에 등장하는 순간부터 정상적으로 타이머가 돌기 시작해서, 예고 없이 갑자기 맞는 일이 없음)
+    if (!enemy.hasBeenVisible) continue;
 
     enemy.fireTimer -= dt;
 
