@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>2D 액션 플랫포머 프로토타입</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #14151a;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Segoe UI', Consolas, monospace;
+    color: #eee;
+  }
+  #gameWrap {
+    position: relative;
+    box-shadow: 0 0 40px rgba(0,0,0,0.6);
+  }
+  canvas {
+    background: #2b2f3a;
+    display: block;
+    image-rendering: pixelated;
+  }
+  #hud {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    pointer-events: none;
+    user-select: none;
+  }
+  #hpBarOuter {
+    width: 200px;
+    height: 22px;
+    border: 2px solid #eee;
+    background: rgba(0,0,0,0.4);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  #hpBarInner {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(#ff5c5c, #c62828);
+    transition: width 0.12s linear;
+  }
+  #hpText {
+    font-size: 13px;
+    margin-top: 3px;
+    text-shadow: 1px 1px 2px #000;
+  }
+  #cooldownRow {
+    margin-top: 6px;
+    display: flex;
+    gap: 8px;
+    font-size: 11px;
+  }
+  .cdBox {
+    width: 70px;
+  }
+  .cdLabel {
+    text-shadow: 1px 1px 2px #000;
+    margin-bottom: 2px;
+  }
+  .cdBarOuter {
+    width: 100%;
+    height: 8px;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid #888;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .cdBarInner {
+    height: 100%;
+    width: 0%;
+    background: #4fc3f7;
+  }
+  #controls {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    background: rgba(0,0,0,0.45);
+    padding: 8px 12px;
+    border-radius: 6px;
+    pointer-events: none;
+    user-select: none;
+  }
+  #controls b { color: #ffd54f; }
+  #respawnMsg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 42px;
+    font-weight: bold;
+    color: #ff5c5c;
+    text-shadow: 2px 2px 6px #000;
+    display: none;
+    pointer-events: none;
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="gameWrap">
+  <canvas id="game" width="960" height="540"></canvas>
+  <div id="hud">
+    <div id="hpBarOuter"><div id="hpBarInner"></div></div>
+    <div id="hpText">HP 5 / 5</div>
+    <div id="cooldownRow">
+      <div class="cdBox">
+        <div class="cdLabel">DASH</div>
+        <div class="cdBarOuter"><div id="dashCdBar" class="cdBarInner"></div></div>
+      </div>
+      <div class="cdBox">
+        <div class="cdLabel">ATTACK</div>
+        <div class="cdBarOuter"><div id="atkCdBar" class="cdBarInner"></div></div>
+      </div>
+    </div>
+  </div>
+  <div id="controls">
+    <div><b>← →</b> : 이동</div>
+    <div><b>Z</b> : 점프 (이단 점프 가능)</div>
+    <div><b>X</b> : 대쉬 (짧은 무적)</div>
+    <div><b>C</b> : 근접 공격</div>
+  </div>
+  <div id="respawnMsg">Respawn...</div>
+</div>
+
+<script>
+"use strict";
+
+/* =========================================================================
+   밸런스 / 튜닝 변수 - 여기서만 수정하면 게임 느낌을 바꿀 수 있습니다.
+   ========================================================================= */
+const CONFIG = {
+  // --- 이동 ---
+  MOVE_SPEED: 420,           // 좌우 이동 속도 (px/sec)
+  GRAVITY: 2100,             // 중력 가속도 (px/sec^2)
+  MAX_FALL_SPEED: 1400,      // 최대 낙하 속도 (px/sec)
+  JUMP_FORCE: 760,           // 점프 초기 상승 속도 (px/sec)
+  MAX_JUMPS: 2,              // 최대 점프 횟수 (2 = 이단 점프)
+
+  // --- 대쉬 ---
+  DASH_SPEED: 1150,          // 대쉬 중 이동 속도 (px/sec)
+  DASH_DURATION: 0.15,       // 대쉬 지속 시간 (sec)
+  DASH_COOLDOWN: 0.9,        // 대쉬 재사용 대기시간 (sec) - 0.8~1.0 권장
+  DASH_IFRAME_DURATION: 0.18,// 대쉬 시작 시 부여되는 무적시간 (sec)
+
+  // --- 근접 공격 ---
+  ATTACK_RANGE_W: 62,        // 공격 판정 가로 크기
+  ATTACK_RANGE_H: 54,        // 공격 판정 세로 크기
+  ATTACK_ACTIVE_DURATION: 0.08,  // 판정이 활성화되는 시간 (sec)
+  ATTACK_RECOVERY_DURATION: 0.30, // 후딜레이 (sec, 이 동안 재공격 불가)
+  ATTACK_DAMAGE: 1,          // 공격 1회당 적에게 주는 데미지
+
+  // --- 플레이어 ---
+  PLAYER_MAX_HP: 5,
+  HIT_INVINCIBILITY_DURATION: 0.6, // 피격 후 무적시간 (sec)
+  RESPAWN_DELAY: 1.2,        // 사망 후 리스폰까지 대기시간 (sec)
+
+  // --- 적 (포탑) ---
+  TURRET_FIRE_INTERVAL: 2.2, // 포탑 발사 주기 (sec)
+  TURRET_MAX_HP: 3,          // 포탑 체력 (근접 공격 3회에 파괴)
+  PROJECTILE_SPEED: 260,     // 투사체 속도 (px/sec) - 낮을수록 피하기 쉬움
+  PROJECTILE_RADIUS: 8,
+  PROJECTILE_DAMAGE: 1,
+};
+
+/* ========================================================================= */
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const W = canvas.width, H = canvas.height;
+
+// --- 입력 처리 ---
+const heldKeys = {};
+const justPressed = {};
+const WATCHED_KEYS = ["ArrowLeft", "ArrowRight", "KeyZ", "KeyX", "KeyC"];
+
+window.addEventListener("keydown", (e) => {
+  if (WATCHED_KEYS.includes(e.code)) e.preventDefault();
+  if (!e.repeat && !heldKeys[e.code]) justPressed[e.code] = true;
+  heldKeys[e.code] = true;
+});
+window.addEventListener("keyup", (e) => {
+  heldKeys[e.code] = false;
+});
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function circleRectOverlap(cx, cy, r, rect) {
+  const closestX = clamp(cx, rect.x, rect.x + rect.w);
+  const closestY = clamp(cy, rect.y, rect.y + rect.h);
+  const dx = cx - closestX, dy = cy - closestY;
+  return dx * dx + dy * dy < r * r;
+}
+
+/* --------------------------- 레벨 지형 --------------------------- */
+const SPAWN_POINT = { x: 40, y: 400 };
+
+const solids = [
+  { x: 0,   y: 500, w: 960, h: 40 },  // 바닥
+  { x: 150, y: 390, w: 160, h: 20 },  // 플랫폼 1
+  { x: 420, y: 300, w: 160, h: 20 },  // 플랫폼 2 (가운데, 조금 더 높음)
+  { x: 700, y: 390, w: 160, h: 20 },  // 플랫폼 3
+];
+
+/* --------------------------- 플레이어 --------------------------- */
+const player = {
+  x: SPAWN_POINT.x, y: SPAWN_POINT.y,
+  w: 34, h: 48,
+  vx: 0, vy: 0,
+  facing: 1,
+  onGround: false,
+  jumpsUsed: 0,
+
+  hp: CONFIG.PLAYER_MAX_HP,
+  invincibleTimer: 0,
+
+  dashState: "idle",       // idle | dashing
+  dashTimer: 0,
+  dashCooldownTimer: 0,
+
+  attackState: "idle",     // idle | active | recovery
+  attackTimer: 0,
+  hitEnemiesThisSwing: new Set(),
+};
+
+let gameState = "playing"; // playing | respawning
+let respawnTimer = 0;
+
+/* --------------------------- 적 (포탑) --------------------------- */
+let enemyIdCounter = 0;
+function makeTurret(x, y) {
+  return {
+    id: enemyIdCounter++,
+    x, y, w: 36, h: 40,
+    hp: CONFIG.TURRET_MAX_HP,
+    fireTimer: CONFIG.TURRET_FIRE_INTERVAL * Math.random(), // 살짝 랜덤 오프셋
+    alive: true,
+    flashTimer: 0,
+  };
+}
+
+const enemies = [
+  makeTurret(230, 500 - 40),   // 바닥 위
+  makeTurret(480, 300 - 40),   // 가운데 플랫폼 위
+  makeTurret(760, 390 - 40),   // 오른쪽 플랫폼 위
+];
+
+const projectiles = []; // {x,y,vx,vy,r}
+
+/* --------------------------- 업데이트 로직 --------------------------- */
+
+function startAttack() {
+  player.attackState = "active";
+  player.attackTimer = CONFIG.ATTACK_ACTIVE_DURATION;
+  player.hitEnemiesThisSwing.clear();
+}
+
+function startDash() {
+  const dir = player.facing;
+  player.dashState = "dashing";
+  player.dashTimer = CONFIG.DASH_DURATION;
+  player.dashCooldownTimer = CONFIG.DASH_COOLDOWN;
+  player.vx = dir * CONFIG.DASH_SPEED;
+  player.vy = 0; // 대쉬 중엔 수평 이동만
+  player.invincibleTimer = Math.max(player.invincibleTimer, CONFIG.DASH_IFRAME_DURATION);
+}
+
+function getAttackHitbox() {
+  const w = CONFIG.ATTACK_RANGE_W, h = CONFIG.ATTACK_RANGE_H;
+  const x = player.facing === 1 ? player.x + player.w : player.x - w;
+  const y = player.y + player.h / 2 - h / 2;
+  return { x, y, w, h };
+}
+
+function respawnPlayer() {
+  player.x = SPAWN_POINT.x;
+  player.y = SPAWN_POINT.y;
+  player.vx = 0;
+  player.vy = 0;
+  player.hp = CONFIG.PLAYER_MAX_HP;
+  player.jumpsUsed = 0;
+  player.invincibleTimer = CONFIG.HIT_INVINCIBILITY_DURATION * 0.5;
+  player.dashState = "idle";
+  player.dashTimer = 0;
+  player.attackState = "idle";
+  projectiles.length = 0;
+  gameState = "playing";
+}
+
+function updatePlayer(dt) {
+  // --- 타이머 ---
+  if (player.invincibleTimer > 0) player.invincibleTimer -= dt;
+  if (player.dashCooldownTimer > 0) player.dashCooldownTimer -= dt;
+
+  // --- 대쉬 입력 ---
+  if (justPressed["KeyX"] && player.dashState === "idle" && player.dashCooldownTimer <= 0) {
+    startDash();
+  }
+
+  // --- 좌우 이동 ---
+  if (player.dashState === "dashing") {
+    player.dashTimer -= dt;
+    if (player.dashTimer <= 0) {
+      player.dashState = "idle";
+    }
+  } else {
+    let move = 0;
+    if (heldKeys["ArrowLeft"]) move -= 1;
+    if (heldKeys["ArrowRight"]) move += 1;
+    player.vx = move * CONFIG.MOVE_SPEED;
+    if (move !== 0) player.facing = move;
+
+    // --- 중력 ---
+    player.vy += CONFIG.GRAVITY * dt;
+    if (player.vy > CONFIG.MAX_FALL_SPEED) player.vy = CONFIG.MAX_FALL_SPEED;
+  }
+
+  // --- 점프 입력 ---
+  if (justPressed["KeyZ"] && player.jumpsUsed < CONFIG.MAX_JUMPS) {
+    player.vy = -CONFIG.JUMP_FORCE;
+    player.jumpsUsed += 1;
+  }
+
+  // --- 공격 입력 / 상태 ---
+  if (justPressed["KeyC"] && player.attackState === "idle") {
+    startAttack();
+  }
+  if (player.attackState === "active") {
+    player.attackTimer -= dt;
+    const hitbox = getAttackHitbox();
+    for (const enemy of enemies) {
+      if (!enemy.alive) continue;
+      if (player.hitEnemiesThisSwing.has(enemy.id)) continue;
+      if (rectsOverlap(hitbox, enemy)) {
+        enemy.hp -= CONFIG.ATTACK_DAMAGE;
+        enemy.flashTimer = 0.12;
+        player.hitEnemiesThisSwing.add(enemy.id);
+        if (enemy.hp <= 0) enemy.alive = false;
+      }
+    }
+    if (player.attackTimer <= 0) {
+      player.attackState = "recovery";
+      player.attackTimer = CONFIG.ATTACK_RECOVERY_DURATION;
+    }
+  } else if (player.attackState === "recovery") {
+    player.attackTimer -= dt;
+    if (player.attackTimer <= 0) player.attackState = "idle";
+  }
+
+  // --- 이동 적용 + 충돌 처리 (X축) ---
+  player.x += player.vx * dt;
+  player.x = clamp(player.x, 0, W - player.w);
+  for (const s of solids) {
+    if (rectsOverlap(player, s)) {
+      if (player.vx > 0) player.x = s.x - player.w;
+      else if (player.vx < 0) player.x = s.x + s.w;
+      player.vx = 0;
+    }
+  }
+
+  // --- 이동 적용 + 충돌 처리 (Y축) ---
+  player.y += player.vy * dt;
+  player.onGround = false;
+  for (const s of solids) {
+    if (rectsOverlap(player, s)) {
+      if (player.vy > 0) {
+        player.y = s.y - player.h;
+        player.vy = 0;
+        player.onGround = true;
+        player.jumpsUsed = 0;
+      } else if (player.vy < 0) {
+        player.y = s.y + s.h;
+        player.vy = 0;
+      }
+    }
+  }
+
+  // 화면 밖으로 떨어지는 안전장치
+  if (player.y > H + 200) {
+    triggerDeath();
+  }
+}
+
+function triggerDeath() {
+  if (gameState !== "playing") return;
+  gameState = "respawning";
+  respawnTimer = CONFIG.RESPAWN_DELAY;
+}
+
+function damagePlayer(amount) {
+  if (player.invincibleTimer > 0 || gameState !== "playing") return;
+  player.hp -= amount;
+  player.invincibleTimer = CONFIG.HIT_INVINCIBILITY_DURATION;
+  if (player.hp <= 0) {
+    player.hp = 0;
+    triggerDeath();
+  }
+}
+
+function updateEnemies(dt) {
+  for (const enemy of enemies) {
+    if (enemy.flashTimer > 0) enemy.flashTimer -= dt;
+    if (!enemy.alive) continue;
+    if (gameState !== "playing") continue;
+
+    enemy.fireTimer -= dt;
+    if (enemy.fireTimer <= 0) {
+      enemy.fireTimer = CONFIG.TURRET_FIRE_INTERVAL;
+      const ex = enemy.x + enemy.w / 2, ey = enemy.y + enemy.h / 2;
+      const px = player.x + player.w / 2, py = player.y + player.h / 2;
+      const dx = px - ex, dy = py - ey;
+      const len = Math.hypot(dx, dy) || 1;
+      projectiles.push({
+        x: ex, y: ey,
+        vx: (dx / len) * CONFIG.PROJECTILE_SPEED,
+        vy: (dy / len) * CONFIG.PROJECTILE_SPEED,
+        r: CONFIG.PROJECTILE_RADIUS,
+      });
+    }
+  }
+}
+
+function updateProjectiles(dt) {
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+
+    if (p.x < -50 || p.x > W + 50 || p.y < -50 || p.y > H + 50) {
+      projectiles.splice(i, 1);
+      continue;
+    }
+
+    if (gameState === "playing" &&
+        circleRectOverlap(p.x, p.y, p.r, player) &&
+        player.invincibleTimer <= 0) {
+      damagePlayer(CONFIG.PROJECTILE_DAMAGE);
+      projectiles.splice(i, 1);
+    }
+  }
+}
+
+function update(dt) {
+  if (gameState === "respawning") {
+    respawnTimer -= dt;
+    updateProjectiles(dt); // 날아가던 투사체는 계속 정리되게
+    if (respawnTimer <= 0) respawnPlayer();
+  } else {
+    updatePlayer(dt);
+    updateEnemies(dt);
+    updateProjectiles(dt);
+  }
+
+  // justPressed 소비 완료 -> 프레임 끝에서 초기화
+  for (const k in justPressed) delete justPressed[k];
+}
+
+/* --------------------------- 렌더링 --------------------------- */
+
+function drawRect(r, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // 배경
+  ctx.fillStyle = "#2b2f3a";
+  ctx.fillRect(0, 0, W, H);
+
+  // 지형
+  for (const s of solids) drawRect(s, "#555b6e");
+
+  // 적
+  for (const enemy of enemies) {
+    if (!enemy.alive) continue;
+    const color = enemy.flashTimer > 0 ? "#ffffff" : "#b23b3b";
+    drawRect(enemy, color);
+    // 포탑 "눈" - 플레이어 방향을 향하는 작은 원
+    ctx.fillStyle = "#241010";
+    ctx.beginPath();
+    const cx = enemy.x + enemy.w / 2, cy = enemy.y + enemy.h / 2;
+    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+    ctx.fill();
+    // 체력 pip
+    const pipW = 8, gap = 3;
+    const totalW = enemy.hp * pipW + (enemy.hp - 1) * gap;
+    let px = enemy.x + enemy.w / 2 - totalW / 2;
+    for (let i = 0; i < enemy.hp; i++) {
+      ctx.fillStyle = "#ffd54f";
+      ctx.fillRect(px, enemy.y - 12, pipW, 5);
+      px += pipW + gap;
+    }
+  }
+
+  // 투사체
+  ctx.fillStyle = "#ffee58";
+  for (const p of projectiles) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 공격 판정 시각화
+  if (player.attackState === "active") {
+    const hb = getAttackHitbox();
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.fillRect(hb.x, hb.y, hb.w, hb.h);
+  }
+
+  // 플레이어
+  if (gameState === "playing") {
+    let color = "#4fc3f7";
+    if (player.dashState === "dashing") color = "#81d4fa";
+    else if (player.invincibleTimer > 0 && Math.floor(performance.now() / 60) % 2 === 0) color = "#ffffff";
+    drawRect(player, color);
+
+    // 바라보는 방향 표시 (작은 삼각형 느낌의 사각형)
+    ctx.fillStyle = "#01579b";
+    const eyeX = player.facing === 1 ? player.x + player.w - 8 : player.x + 2;
+    ctx.fillRect(eyeX, player.y + 8, 6, 6);
+  }
+
+  // HUD (HTML 오버레이) 갱신
+  updateHud();
+}
+
+/* --------------------------- HUD --------------------------- */
+const hpBarInner = document.getElementById("hpBarInner");
+const hpText = document.getElementById("hpText");
+const dashCdBar = document.getElementById("dashCdBar");
+const atkCdBar = document.getElementById("atkCdBar");
+const respawnMsg = document.getElementById("respawnMsg");
+
+function updateHud() {
+  const hpRatio = clamp(player.hp / CONFIG.PLAYER_MAX_HP, 0, 1);
+  hpBarInner.style.width = (hpRatio * 100) + "%";
+  hpText.textContent = `HP ${Math.max(0, player.hp)} / ${CONFIG.PLAYER_MAX_HP}`;
+
+  const dashRatio = 1 - clamp(player.dashCooldownTimer / CONFIG.DASH_COOLDOWN, 0, 1);
+  dashCdBar.style.width = (dashRatio * 100) + "%";
+  dashCdBar.style.background = dashRatio >= 1 ? "#4fc3f7" : "#555";
+
+  const atkCooldownActive = player.attackState !== "idle";
+  const atkRatio = atkCooldownActive ? 0 : 1;
+  atkCdBar.style.width = (atkRatio * 100) + "%";
+  atkCdBar.style.background = atkRatio >= 1 ? "#ffb74d" : "#555";
+
+  respawnMsg.style.display = gameState === "respawning" ? "block" : "none";
+}
+
+/* --------------------------- 메인 루프 --------------------------- */
+let lastTime = performance.now();
+
+function loop(now) {
+  let dt = (now - lastTime) / 1000;
+  lastTime = now;
+  dt = Math.min(dt, 0.033); // 탭 전환 등으로 인한 프레임 급증 방지
+
+  update(dt);
+  draw();
+
+  requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
