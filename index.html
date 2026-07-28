@@ -131,7 +131,8 @@
     <div style="margin-top:6px; font-size:11px; opacity:0.85;">
       회색 발판: 완전 고정 (아래에서도 못 뚫음)<br>
       청록색 발판: 아래에서 점프로 관통 가능<br>
-      주황 벽: 구역 내 몬스터를 모두 처치해야 사라짐
+      주황 벽: 구역 내 몬스터를 모두 처치해야 사라짐<br>
+      보라 포탑: 근접 공격에 맞아도 스턴(발사 타이머 초기화) 안 걸림
     </div>
   </div>
   <div id="respawnMsg">Respawn...</div>
@@ -308,7 +309,7 @@ let respawnTimer = 0;
 
 /* --------------------------- 적 (포탑) --------------------------- */
 let enemyIdCounter = 0;
-function makeTurret(x, y) {
+function makeTurret(x, y, stunnable = true) {
   return {
     id: enemyIdCounter++,
     spawnX: x, spawnY: y,
@@ -319,6 +320,7 @@ function makeTurret(x, y) {
     alive: true,
     flashTimer: 0,
     hasBeenVisible: false, // 카메라 화면 안에 한 번이라도 들어온 적 있는지 (아직 없으면 발사 금지)
+    stunnable, // false면 근접 공격을 맞아도 발사 타이머가 초기화되지 않음 (스턴 면역, 보라색으로 표시)
   };
 }
 
@@ -328,11 +330,11 @@ const enemies = [
   makeTurret(760,  390 - 40),  // 원웨이 플랫폼
   makeTurret(1090, 420 - 40),  // 원웨이 플랫폼
   makeTurret(1340, 320 - 40),  // 고정 플랫폼
-  makeTurret(1600, 500 - 40),  // 바닥 (트인 구간)
-  makeTurret(2040, 390 - 40),  // 원웨이 플랫폼
-  makeTurret(2560, 420 - 40),  // 고정 플랫폼
-  makeTurret(3190, 420 - 40),  // 원웨이 플랫폼
-  makeTurret(3630, 260 - 40),  // 고정 플랫폼 (레벨 끝자락)
+  makeTurret(1600, 500 - 40, false), // 바닥 (트인 구간) - 벽 왼쪽 스턴 면역 수문장
+  makeTurret(2040, 390 - 40, false), // 원웨이 플랫폼 - 벽 오른쪽 스턴 면역 수문장
+  makeTurret(2560, 420 - 40), // 고정 플랫폼
+  makeTurret(3190, 420 - 40), // 원웨이 플랫폼
+  makeTurret(3630, 260 - 40), // 고정 플랫폼 (레벨 끝자락)
 ];
 
 // 플레이어 리스폰 시 적도 처음 상태(체력/생존 여부/발사 타이머)로 전부 되돌림
@@ -476,6 +478,12 @@ function updatePlayer(dt) {
         enemy.hp -= CONFIG.ATTACK_DAMAGE;
         enemy.flashTimer = 0.12;
         player.hitEnemiesThisSwing.add(enemy.id);
+        // 스턴: 맞을 때마다 발사 타이머를 처음부터 다시 시작 - 계속 때리면 영원히 못 쏘게 됨.
+        // stunnable이 false인 포탑(보라색, 벽 옆 수문장)은 이 효과에서 제외.
+        if (enemy.stunnable) {
+          enemy.fireTimer = CONFIG.TURRET_FIRE_INTERVAL;
+          enemy.telegraphing = false;
+        }
         if (enemy.hp <= 0) enemy.alive = false;
       }
     }
@@ -692,7 +700,8 @@ function draw() {
   // 적
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
-    let color = enemy.flashTimer > 0 ? "#ffffff" : "#b23b3b";
+    const baseColor = enemy.stunnable ? "#b23b3b" : "#8e44ad"; // 보라색 = 근접 공격으로도 스턴(타이머 초기화) 안 걸림
+    let color = enemy.flashTimer > 0 ? "#ffffff" : baseColor;
     // 공격 예고 중에는 빠르게 밝아졌다 어두워지는 색으로 경고
     if (enemy.telegraphing) {
       const pulse = (Math.sin(performance.now() / 60) + 1) / 2; // 0~1
