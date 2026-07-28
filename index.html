@@ -79,13 +79,14 @@
   }
   #controls {
     position: absolute;
-    bottom: 10px;
-    left: 10px;
+    top: 10px;
+    right: 10px;
     font-size: 13px;
     line-height: 1.6;
     background: rgba(0,0,0,0.45);
     padding: 8px 12px;
     border-radius: 6px;
+    text-align: right;
     pointer-events: none;
     user-select: none;
   }
@@ -174,6 +175,10 @@ const CONFIG = {
   PROJECTILE_SPEED: 260,     // 투사체 속도 (px/sec) - 낮을수록 피하기 쉬움
   PROJECTILE_RADIUS: 8,
   PROJECTILE_DAMAGE: 1,
+
+  // --- 카메라 ---
+  CAMERA_SMOOTHING: 6,       // 클수록 카메라가 플레이어를 더 빨리 따라잡음 (지수 감쇠 계수, 프레임레이트 무관)
+  CAMERA_DEADZONE_W: 160,    // 화면 정중앙 기준 가로 데드존 폭(px) - 이 안에서 움직이는 동안엔 카메라가 안 움직임
 };
 
 /* ========================================================================= */
@@ -210,18 +215,30 @@ function circleRectOverlap(cx, cy, r, rect) {
 }
 
 /* --------------------------- 레벨 지형 --------------------------- */
+const WORLD_WIDTH = 3840; // 캔버스 너비(960)의 4배 - 가로 스크롤 레벨
 const SPAWN_POINT = { x: 40, y: 400 };
 
 // 완전 고정형 플랫폼: 모든 방향에서 막힘 (아래에서 점프해도 관통 불가 - 머리가 부딪힘)
 const solidPlatforms = [
-  { x: 0,   y: 500, w: 960, h: 40 },  // 바닥
-  { x: 420, y: 300, w: 160, h: 20 },  // 플랫폼 2 (가운데, 고정형)
+  { x: 0,    y: 500, w: WORLD_WIDTH, h: 40 }, // 바닥 (레벨 전체를 가로지름)
+  { x: 420,  y: 300, w: 160, h: 20 },
+  { x: 1300, y: 320, w: 140, h: 20 },
+  { x: 1780, y: 260, w: 120, h: 20 },
+  { x: 2520, y: 420, w: 160, h: 20 },
+  { x: 3600, y: 260, w: 140, h: 20 }, // 레벨 끝자락, 높은 고정 플랫폼
 ];
 
 // 관통형(원웨이) 플랫폼: 위에서 떨어질 때만 착지, 아래에서 위로 점프할 땐 그냥 통과
 const oneWayPlatforms = [
-  { x: 150, y: 390, w: 160, h: 20 },  // 플랫폼 1
-  { x: 700, y: 390, w: 160, h: 20 },  // 플랫폼 3
+  { x: 150,  y: 390, w: 160, h: 20 },
+  { x: 700,  y: 390, w: 160, h: 20 },
+  { x: 1050, y: 420, w: 160, h: 20 },
+  { x: 1550, y: 420, w: 160, h: 20 },
+  { x: 2000, y: 390, w: 180, h: 20 },
+  { x: 2260, y: 300, w: 150, h: 20 },
+  { x: 2760, y: 340, w: 140, h: 20 },
+  { x: 3150, y: 420, w: 180, h: 20 },
+  { x: 3400, y: 340, w: 160, h: 20 },
 ];
 
 /* --------------------------- 플레이어 --------------------------- */
@@ -264,9 +281,16 @@ function makeTurret(x, y) {
 }
 
 const enemies = [
-  makeTurret(230, 500 - 40),   // 바닥 위
-  makeTurret(480, 300 - 40),   // 가운데 플랫폼 위
-  makeTurret(760, 390 - 40),   // 오른쪽 플랫폼 위
+  makeTurret(230,  500 - 40),  // 바닥
+  makeTurret(480,  300 - 40),  // 고정 플랫폼
+  makeTurret(760,  390 - 40),  // 원웨이 플랫폼
+  makeTurret(1090, 420 - 40),  // 원웨이 플랫폼
+  makeTurret(1340, 320 - 40),  // 고정 플랫폼
+  makeTurret(1600, 500 - 40),  // 바닥 (트인 구간)
+  makeTurret(2040, 390 - 40),  // 원웨이 플랫폼
+  makeTurret(2560, 420 - 40),  // 고정 플랫폼
+  makeTurret(3190, 420 - 40),  // 원웨이 플랫폼
+  makeTurret(3630, 260 - 40),  // 고정 플랫폼 (레벨 끝자락)
 ];
 
 // 플레이어 리스폰 시 적도 처음 상태(체력/생존 여부/발사 타이머)로 전부 되돌림
@@ -283,6 +307,36 @@ function resetEnemies() {
 }
 
 const projectiles = []; // {x,y,vx,vy,r}
+
+/* --------------------------- 카메라 --------------------------- */
+// camera.x/y = 캔버스 좌측 상단이 가리키는 "월드 좌표". 월드 오브젝트를 그릴 때
+// 화면 좌표 = 월드 좌표 - camera 값 이 되도록 draw()에서 translate 처리한다.
+const camera = { x: 0, y: 0 };
+
+function snapCameraToPlayer() {
+  camera.x = clamp(player.x + player.w / 2 - W / 2, 0, WORLD_WIDTH - W);
+  camera.y = 0;
+}
+
+function updateCamera(dt) {
+  const playerCenterX = player.x + player.w / 2;
+  const halfDeadzone = CONFIG.CAMERA_DEADZONE_W / 2;
+  const leftBound = camera.x + W / 2 - halfDeadzone;
+  const rightBound = camera.x + W / 2 + halfDeadzone;
+
+  // 데드존: 플레이어가 화면 중앙 근처 일정 범위 안에 있는 동안은 목표 위치를 그대로 유지
+  let targetX = camera.x;
+  if (playerCenterX < leftBound) targetX = playerCenterX - (W / 2 - halfDeadzone);
+  else if (playerCenterX > rightBound) targetX = playerCenterX - (W / 2 + halfDeadzone);
+
+  // 지수 감쇠 lerp: 프레임레이트가 들쭉날쭉해도 동일한 체감 속도로 부드럽게 따라감
+  const smoothing = 1 - Math.exp(-CONFIG.CAMERA_SMOOTHING * dt);
+  camera.x += (targetX - camera.x) * smoothing;
+
+  // 레벨 경계를 벗어나지 않도록 고정
+  camera.x = clamp(camera.x, 0, WORLD_WIDTH - W);
+  camera.y = 0; // 세로 스크롤 없음 (레벨 높이 = 캔버스 높이)
+}
 
 /* --------------------------- 업데이트 로직 --------------------------- */
 
@@ -322,6 +376,7 @@ function respawnPlayer() {
   player.attackState = "idle";
   projectiles.length = 0;
   resetEnemies();
+  snapCameraToPlayer(); // 리스폰 지점까지 카메라가 스르륵 끌려오지 않고 즉시 이동
   gameState = "playing";
 }
 
@@ -387,7 +442,7 @@ function updatePlayer(dt) {
 
   // --- 이동 적용 + 충돌 처리 (X축, 고정형 플랫폼만 - 원웨이는 좌우로 막지 않음) ---
   player.x += player.vx * dt;
-  player.x = clamp(player.x, 0, W - player.w);
+  player.x = clamp(player.x, 0, WORLD_WIDTH - player.w);
   for (const s of solidPlatforms) {
     if (rectsOverlap(player, s)) {
       if (player.vx > 0) player.x = s.x - player.w;
@@ -487,7 +542,7 @@ function updateProjectiles(dt) {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
 
-    if (p.x < -50 || p.x > W + 50 || p.y < -50 || p.y > H + 50) {
+    if (p.x < -50 || p.x > WORLD_WIDTH + 50 || p.y < -50 || p.y > H + 50) {
       projectiles.splice(i, 1);
       continue;
     }
@@ -512,6 +567,8 @@ function update(dt) {
     updateProjectiles(dt);
   }
 
+  updateCamera(dt);
+
   // justPressed 소비 완료 -> 프레임 끝에서 초기화
   for (const k in justPressed) delete justPressed[k];
 }
@@ -526,9 +583,17 @@ function drawRect(r, color) {
 function draw() {
   ctx.clearRect(0, 0, W, H);
 
-  // 배경
+  // 배경 (화면 좌표 기준 - 카메라와 무관하게 항상 뷰포트 전체를 채움)
   ctx.fillStyle = "#2b2f3a";
   ctx.fillRect(0, 0, W, H);
+
+  // ===== 여기서부터 월드 좌표계 =====
+  // ctx.translate로 카메라만큼 밀어서, 아래 코드는 전부 "월드 좌표 그대로" 그리면 됨.
+  // 플레이어/적/투사체/지형처럼 카메라를 따라 스크롤되어야 하는 것만 이 블록 안에 넣을 것.
+  // (반대로 HP바/조작안내/쿨다운 게이지/리스폰 문구는 canvas가 아니라 HTML 오버레이라서
+  //  애초에 카메라 영향을 받지 않음 - updateHud() 쪽 참고)
+  ctx.save();
+  ctx.translate(-camera.x, -camera.y);
 
   // 지형 - 고정형(완전 차단)은 회색, 원웨이(관통형)는 청록색 + 상단에 밝은 선으로 구분
   for (const s of solidPlatforms) drawRect(s, "#555b6e");
@@ -593,7 +658,12 @@ function draw() {
     ctx.fillRect(eyeX, player.y + 8, 6, 6);
   }
 
-  // HUD (HTML 오버레이) 갱신
+  ctx.restore();
+  // ===== 여기부터 다시 화면(screen) 좌표계 =====
+  // 지금은 canvas에 직접 그리는 화면-고정 UI가 없지만, 나중에 추가한다면
+  // 반드시 이 ctx.restore() 아래(=world translate가 풀린 상태)에서 그릴 것.
+
+  // HUD (HTML 오버레이) 갱신 - 이 요소들은 애초에 canvas 밖의 절대 위치 DOM이라 카메라와 무관함
   updateHud();
 }
 
