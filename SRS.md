@@ -9,7 +9,7 @@
 ## 2. 시스템 개요
 
 - **구성**: 단일 HTML 파일. 인라인 `<style>` + `<canvas>` + 인라인 `<script>`. 빌드 도구/번들러/외부 라이브러리 없음.
-- **렌더링**: Canvas 2D API. 960×540 고정 해상도, `image-rendering: pixelated`.
+- **렌더링**: Canvas 2D API. 1440×540 고정 해상도(`<canvas>` 태그의 `width`/`height` 속성이 곧 `W`/`H`), `image-rendering: pixelated`. 가로가 원래(960)보다 넓은 이유는 FR-9.5a 참고 - 몬스터의 감지 범위 기준값은 이 확장 이전의 960×540에 고정돼 있어, 넓어진 화면 덕분에 아직 감지되지 않은 몬스터도 미리 볼 수 있다.
 - **루프**: `requestAnimationFrame` 기반. 프레임마다 `dt`(초 단위 경과시간, 0.033초로 클램프)를 계산해 물리/로직에 사용 (프레임레이트 무관 동작).
 - **좌표계**: 월드 좌표(픽셀) 기준으로 모든 오브젝트 위치를 관리하고, 렌더링 시 카메라 오프셋만큼 캔버스를 `translate`해서 화면에 투영. HUD는 DOM 오버레이라 카메라와 무관.
 - **영속성**: 없음. 새로고침 시 모든 상태 초기화.
@@ -96,14 +96,15 @@
 - FR-9.2 발사 주기 `TURRET_FIRE_INTERVAL`(2.2s), 발사 `TURRET_TELEGRAPH_DURATION`(0.5s) 전부터 예고 표시.
 - FR-9.3 발사 시점의 플레이어 중심을 향해 투사체 생성(속도 `PROJECTILE_SPEED`=260px/s, 반경 `PROJECTILE_RADIUS`=8, 피해 `PROJECTILE_DAMAGE`=1을 투사체 자체의 `damage` 필드로 보유).
 - FR-9.4 일부 개체(`stunnable=false`)는 근접 공격을 맞아도 발사 타이머가 초기화되지 않음(스턴 면역).
-- FR-9.5 화면에 한 번도 보인 적 없는 개체는 완전 대기 상태(발사 안 함) — 카메라에 처음 들어오는 순간부터 동작 시작.
+- FR-9.5 화면에 한 번도 보인 적 없는 개체(`hasBeenVisible=false`)는 완전 대기 상태(AI 자체가 안 돎) — 카메라에 처음 들어오는 순간부터 매 프레임 `updateTurretAI` 호출 시작.
+- FR-9.5a 감지/어그로/공격 범위(모든 몬스터 공통 개념 - FR-10.3/10.4 체이서와 동일 구조를 공유): `hasBeenVisible`이 true여도 `enemy.aggro`가 true가 되기 전까진 예고/발사를 전혀 안 함(완전 대기 - 향후 유휴 애니메이션이 들어갈 자리). 플레이어와의 거리(가로/세로 각각)가 `enemy.detectionRangeW/H` 이내면 `aggro=true`로 전환, 이미 `aggro`인 상태에서 `enemy.leashRangeW/H`를 벗어나면 `aggro=false`로 되돌아가며 `fireTimer`/`telegraphing`도 리셋됨. `aggro`이고 `enemy.attackRangeW/H` 이내일 때만 `fireTimer`가 실제로 줄어들고 발사됨. 포탑/저격수는 세 범위가 전부 `ENEMY_DEFAULT_RANGE_W/H`(480/270, 원래 960×540 화면의 절반값 - FR-1의 렌더링 해상도 참고)로 동일하게 세팅됨. 이 기본값은 실제 캔버스 `W`/`H`(1440×540)와 무관하게 고정되어 있어, 넓어진 카메라 뷰 안에서 아직 감지 범위 밖인 몬스터를 플레이어가 미리 볼 수 있음.
 - FR-9.6 저격수(`type="sniper"`) 변종: FR-9.1~FR-9.5을 값 그대로 전부 공유(체력/발사 주기/예고 시간 동일, `updateTurretAI`를 그대로 재사용). 유일한 차이는 발사하는 투사체에 `unblockable: true`가 붙는다는 것과 그 투사체의 반경이 `SNIPER_PROJECTILE_RADIUS`(15, 일반 `PROJECTILE_RADIUS`=8보다 큼)라는 것.
   - `unblockable` 투사체는 FR-4(피격 유예)/FR-5(표류)를 전혀 타지 않음 — 명중 시 `damagePlayer()`(유예 큐에 push) 대신 `applyDamageToHp()`를 직접 호출해 즉시 HP를 깎음(`invincibleTimer`는 그대로 존중).
   - FR-6.2(표류 반격의 투사체 격추/2연타 보너스) 루프에서도 명시적으로 제외되어 반격으로 격추 불가 — 표류·반격 어느 쪽으로도 무효화할 수 없고 오직 이동으로 피해야 함.
   - 시각적으로 몸통은 청록(`#00838f`, 예고 중엔 마젠타 계열 펄스)으로 포탑(빨강)/체이서(초록)/스턴 면역(보라)과 구분되고, 투사체는 빨간 광륜(`ctx.shadowBlur`)이 있는 큰 원으로 일반 투사체(노란 원)와 확실히 구분됨.
 
 ### FR-10. 적 — 체이서 (chaser)
-- FR-10.1 상태 머신: `patrol → chase → windup → recovery → (chase|return)`, `return → patrol`.
+- FR-10.1 상태 머신: `patrol → chase → windup → recovery → (chase|return)`, `return → patrol`. `chase|windup|recovery` = 어그로 상태, `patrol|return` = 비-어그로(FR-9.5a의 공통 감지/어그로/공격 범위 개념에서 체이서의 "아그로" 등가물).
 - FR-10.2 인식(perception) 폴링: 매 프레임이 아니라 `CHASER_PERCEPTION_INTERVAL`(0.1s)마다 한 번씩만 실제 플레이어 위치를 다시 샘플링(`perceivedPlayerX/Y`). 그 사이엔 마지막 샘플을 그대로 사용 — 모든 인식/추적 판단은 이 값 기준.
 - FR-10.3 인식 범위: 가로 `CHASER_DETECTION_RANGE`(480px) × 세로 `CHASER_DETECTION_VERTICAL_RANGE`(130px) 안에 들어오면 `patrol`/`return`에서 `chase`로 전환.
 - FR-10.4 어그로(추적 유지) 범위: `chase` 중 `CHASER_LEASH_RANGE`(650px)보다 멀어지면 추적 포기 → `return`.
@@ -114,7 +115,7 @@
 - FR-10.9 근접 공격/표류 반격에 맞으면 스턴(`CHASER_STUN_DURATION`=0.5s, 스턴 면역 개체 제외) — `windup` 중이면 캔슬되어 `chase`로 되돌아감.
 
 ### FR-11. 레벨 지형
-- FR-11.1 월드 폭 3840px(화면의 4배). 바닥 y=500, 낙사 구멍 2곳(x=900±100, x=2350±120).
+- FR-11.1 월드 폭 3840px(화면 폭의 약 2.7배). 바닥 y=500, 낙사 구멍 2곳(x=900±100, x=2350±120).
 - FR-11.2 고정형 플랫폼 5개(바닥 제외) + 원웨이 플랫폼 9개로 수직 구간 구성.
 - FR-11.3 봉쇄 벽(x=1900): 벽보다 스폰 쪽(`spawnX<1900`)에 살아있는 적이 하나라도 있으면 잠김 — 플레이어/체이서 모두 통과 불가(양방향 차단, 어떤 점프로도 우회 불가). 벽 너머 적은 벽이 잠긴 동안 "화면 밖"과 동일하게 플레이어를 인식하지 못함.
 
@@ -172,8 +173,9 @@ chaser: `patrolMinX,patrolMaxX,facing,aiState,attackTimer,stunTimer,perceptionTi
 | 이동 | MOVE_SPEED / GRAVITY / MAX_FALL_SPEED / JUMP_FORCE / MAX_JUMPS | 420 / 2100 / 1400 / 760 / 2 |
 | 이동(숏홉) | AIR_ATTACK_HOP_FORCE | 420 |
 | 근접 공격(지상) | ATTACK_RANGE_W/H / ATTACK_ACTIVE_DURATION / ATTACK_RECOVERY_DURATION / ATTACK_DAMAGE | 85/75 / 0.08 / 0.30 / 1 |
-| 근접 공격(공중) | AIR_ATTACK_RADIUS / 데미지(getAirAttackDamage = ATTACK_DAMAGE/2) | 120 / 0.5 |
+| 근접 공격(공중) | AIR_ATTACK_RADIUS / 데미지(getAirAttackDamage = ATTACK_DAMAGE/2) | 85 / 0.5 |
 | 플레이어 | PLAYER_MAX_HP / HIT_INVINCIBILITY_DURATION / RESPAWN_DELAY / PIT_FALL_BUFFER | 5 / 0.5 / 1.2 / 60 |
+| 적 공통 범위(포탑/저격수 기본값) | ENEMY_DEFAULT_RANGE_W/H (감지=어그로=공격 범위 전부 동일) | 480/270 |
 | 포탑 | TURRET_FIRE_INTERVAL / TURRET_TELEGRAPH_DURATION / TURRET_MAX_HP / PROJECTILE_SPEED/RADIUS/DAMAGE | 2.2 / 0.5 / 5 / 260 / 8 / 1 |
 | 저격수 | (FR-9.1~9.5 값 전부 포탑과 공유) / SNIPER_PROJECTILE_RADIUS | - / 15 |
 | 카메라 | CAMERA_SMOOTHING / CAMERA_DEADZONE_W | 6 / 160 |
