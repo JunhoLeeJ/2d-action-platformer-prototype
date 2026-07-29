@@ -30,4 +30,6 @@ Everything lives in `index.html`. Read the "게임 개요" (game overview) comme
 ## Git / deployment
 
 - Repo is linked to Vercel (`.vercel/project.json`) and to GitHub (`origin`). Commits to `master` do not auto-deploy; deploying is a separate explicit step (`vercel` / `vercel --prod`).
+- **Pushing to GitHub (`origin`) is pre-authorized**: after committing, push to `master` automatically without asking for confirmation first.
+- **Vercel deployment stays manual**: never run `vercel` / `vercel --prod` unless the user explicitly asks for that deploy, even after pushing to GitHub.
 - No CI, no PR checks — the only verification available is manual play-testing and reasoning about the code (or writing a throwaway Node script that copies the relevant pure-logic functions to simulate them, since the real code depends on `<canvas>`/DOM).
