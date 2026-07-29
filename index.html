@@ -132,6 +132,8 @@
      - W 또는 Space    : 점프 (이단 점프 가능, 혼용해서 눌러도 됨)
      - 마우스 좌클릭    : 근접 공격 - 땅에 있으면 마우스 커서 방향의 좁은 사각 판정, 공중이면 방향
                          무관 원형 판정(AIR_ATTACK_RADIUS, 데미지는 지상의 절반 - startAttack 참고)
+     - 점프 직후 좌클릭  : "숏홉" - SHORT_HOP_WINDOW 이내에 공중 공격을 넣으면 상승 속도가
+                         SHORT_HOP_FORCE로 깎여 거의 제자리에서 위쪽 적만 때리는 낮은 점프가 됨
      - 마우스 우클릭    : 표류(drift) 발동
      - 마우스 커서      : player.facing(근접 공격 방향)을 매 프레임 결정 - 이동 방향과 무관.
                          단, 표류 반격은 방향 무관(플레이어 중심 광역 판정)이라 이 값의 영향을 안 받음
@@ -174,6 +176,10 @@ const CONFIG = {
   MAX_FALL_SPEED: 1400,      // 최대 낙하 속도 (px/sec)
   JUMP_FORCE: 760,           // 점프 초기 상승 속도 (px/sec)
   MAX_JUMPS: 2,              // 최대 점프 횟수 (2 = 이단 점프)
+  // 낮은 점프("숏홉") - 점프 입력 후 이 시간 안에 공격을 넣으면 상승 속도를 JUMP_FORCE 대신
+  // SHORT_HOP_FORCE로 깎아서 거의 제자리에서 공중 공격만 나가는 것처럼 보이게 한다 (updatePlayer 참고).
+  SHORT_HOP_WINDOW: 0.15,    // 점프 입력 후 이 시간(sec) 안에 공격해야 숏홉 취소가 적용됨
+  SHORT_HOP_FORCE: 220,      // 숏홉 취소 시 적용되는 상승 속도 (px/sec) - JUMP_FORCE(760)보다 훨씬 작아 최고점이 약 11px 정도로 미미함
 
   // --- 근접 공격 ---
   // 땅/공중 판정은 모양(사각형 vs 원)과 데미지가 다르지만 활성/후딜레이 타이밍은 공유한다 (startAttack 참고).
@@ -181,12 +187,15 @@ const CONFIG = {
   ATTACK_RANGE_H: 75,        // 지상 공격 판정 세로 크기
   ATTACK_ACTIVE_DURATION: 0.08,  // 판정이 활성화되는 시간 (sec)
   ATTACK_RECOVERY_DURATION: 0.30, // 후딜레이 (sec, 이 동안 재공격 불가)
-  ATTACK_DAMAGE: 2,          // 지상 공격 1회당 적에게 주는 데미지 (몬스터 HP를 전부 2배로 늘려 절반 데미지인 공중 공격도 정수로 표현 - CHASER_MAX_HP/TURRET_MAX_HP 주석 참고)
+  ATTACK_DAMAGE: 1,          // 지상 공격 1회당 적에게 주는 데미지
   // 공중 공격(플레이어가 땅에 없을 때 좌클릭) 판정 반경. 플레이어 중심 기준 원형이라 방향 무관.
   // 지상 공격의 최대 리치(~109px, 대각 코너 기준)보다는 크고 표류 반격의 최대 리치(~152px)보다는 작게 잡음.
   AIR_ATTACK_RADIUS: 120,
-  // 데미지는 getAirAttackDamage()로 계산 - ATTACK_DAMAGE의 절반을 상수로 다시 박지 않고 항상
-  // 지상 공격의 절반으로 유지되도록 함수화 (getDriftCooldownOnCounter/Whiff와 같은 이유).
+  // 데미지는 getAirAttackDamage()로 계산 - ATTACK_DAMAGE의 절반(0.5)을 상수로 다시 박지 않고 항상
+  // 지상 공격의 절반으로 유지되도록 함수화 (getDriftCooldownOnCounter/Whiff와 같은 이유). 몬스터 HP를
+  // 부풀리는 대신 반칸 단위 HP를 그대로 쓰고, 대신 체력 표시를 마름모(다이아) pip로 바꿔 반칸을
+  // 시각적으로 표현한다 (draw()의 drawHpPip 참고) - 그래야 몬스터 HP가 낮게 유지되어 몇 대 때려야
+  // 죽는지 한눈에 보이고, 표류 반격의 배율(DRIFT_COUNTER_DAMAGE_MULTIPLIER)도 원래 체감 그대로 유지됨.
 
   // --- 플레이어 ---
   PLAYER_MAX_HP: 5,
@@ -197,7 +206,7 @@ const CONFIG = {
   // --- 적 (포탑) ---
   TURRET_FIRE_INTERVAL: 2.2, // 포탑 발사 주기 (sec, 예고 시작부터 다음 예고 시작까지)
   TURRET_TELEGRAPH_DURATION: 0.5, // 발사 전 "예고" 시간 (sec) - 이 동안 포탑이 경고 표시를 보여줌
-  TURRET_MAX_HP: 10,         // 포탑 체력 (지상 공격 5회 또는 공중 공격 10회에 파괴 - ATTACK_DAMAGE가 2배로 늘어난 만큼 함께 2배로 늘려 체감 타수는 그대로 유지)
+  TURRET_MAX_HP: 5,          // 포탑 체력 (지상 공격 5회 또는 공중 공격 10회에 파괴)
   PROJECTILE_SPEED: 260,     // 투사체 속도 (px/sec) - 낮을수록 피하기 쉬움
   PROJECTILE_RADIUS: 8,
   PROJECTILE_DAMAGE: 1,
@@ -207,7 +216,7 @@ const CONFIG = {
   CAMERA_DEADZONE_W: 160,    // 화면 정중앙 기준 가로 데드존 폭(px) - 이 안에서 움직이는 동안엔 카메라가 안 움직임
 
   // --- 적 (추적형 근접 몬스터: 체이서) ---
-  CHASER_MAX_HP: 6,          // 지상 공격 3회 또는 공중 공격 6회에 처치 (TURRET_MAX_HP와 같은 이유로 2배)
+  CHASER_MAX_HP: 3,          // 지상 공격 3회 또는 공중 공격 6회에 처치
   CHASER_PATROL_SPEED: 90,   // 평상시 좌우 순찰 속도 (px/sec) - 아그로가 풀려 순찰 위치로 복귀할 때도 이 속도로 걸어감
   CHASER_CHASE_SPEED: 260,   // 플레이어를 인식하고 쫓아갈 때 속도 (px/sec)
 
@@ -436,6 +445,7 @@ const player = {
   facing: 1,        // -1(왼쪽)|1(오른쪽) - 이동 방향이 아니라 마우스 커서 방향으로 매 프레임 갱신됨 (updatePlayer 참고). 공격/반격 판정 방향이 이 값을 그대로 씀
   onGround: false,
   jumpsUsed: 0,
+  timeSinceJump: Infinity, // 마지막 점프 입력 이후 지난 시간(sec) - 숏홉(SHORT_HOP_WINDOW) 판정에 씀
 
   hp: CONFIG.PLAYER_MAX_HP,
   invincibleTimer: 0,
@@ -709,14 +719,22 @@ function updatePlayer(dt) {
   if (player.vy > CONFIG.MAX_FALL_SPEED) player.vy = CONFIG.MAX_FALL_SPEED;
 
   // --- 점프 입력 (W 또는 Space, 둘 다 동일하게 동작) ---
+  player.timeSinceJump += dt;
   if ((justPressed["KeyW"] || justPressed["Space"]) && player.jumpsUsed < CONFIG.MAX_JUMPS) {
     player.vy = -CONFIG.JUMP_FORCE;
     player.jumpsUsed += 1;
+    player.timeSinceJump = 0;
   }
 
   // --- 공격 입력 / 상태 (좌클릭) ---
   if (justPressed["Mouse0"] && player.attackState === "idle") {
     startAttack();
+    // 숏홉: 점프 직후(SHORT_HOP_WINDOW 이내) 공중 공격을 넣으면 상승 속도를 대폭 깎아서
+    // "타닥" 입력만으로 거의 제자리에서 위쪽 적을 때리는 낮은 점프가 되게 한다. 이미 착지해
+    // 있으면(attackIsAirborne=false) 지상 공격이라 적용 안 됨.
+    if (player.attackIsAirborne && player.timeSinceJump <= CONFIG.SHORT_HOP_WINDOW) {
+      player.vy = -CONFIG.SHORT_HOP_FORCE;
+    }
   }
   if (player.attackState === "active") {
     player.attackTimer -= dt;
@@ -1214,6 +1232,36 @@ function drawRect(r, color) {
   ctx.fillRect(r.x, r.y, r.w, r.h);
 }
 
+// 몬스터 체력 pip 1칸 - 마름모(다이아) 모양. fillRatio(0~1)만큼 왼쪽부터 채워서 반칸 체력(0.5)을
+// 표현한다. 몬스터 HP를 부풀리지 않고도(ATTACK_DAMAGE=1, 공중 공격=0.5) 체력을 정확히 보여주기 위한
+// 용도 - enemy.hp가 정수+0.5 단위로만 줄어드므로 fillRatio는 항상 0/0.5/1 중 하나만 나온다.
+function drawHpPip(cx, cy, size, fillRatio) {
+  const half = size / 2;
+  function diamondPath() {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - half);
+    ctx.lineTo(cx + half, cy);
+    ctx.lineTo(cx, cy + half);
+    ctx.lineTo(cx - half, cy);
+    ctx.closePath();
+  }
+  diamondPath();
+  ctx.fillStyle = "rgba(0,0,0,0.4)"; // 빈 칸 배경
+  ctx.fill();
+  if (fillRatio > 0) {
+    ctx.save();
+    diamondPath();
+    ctx.clip();
+    ctx.fillStyle = "#ffd54f";
+    ctx.fillRect(cx - half, cy - half, size * fillRatio, size); // 왼쪽부터 fillRatio만큼만 채움(클립으로 다이아 모양 유지)
+    ctx.restore();
+  }
+  diamondPath();
+  ctx.strokeStyle = "rgba(255,255,255,0.5)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
 // 유령 NPC 렌더링 - 함수로 분리한 이유는 draw()에서 플레이어와 겹칠 때만 호출 순서를
 // 바꿔서(플레이어보다 나중에 그려서 위에 보이게) 써야 하기 때문.
 function drawGhostNpc() {
@@ -1299,14 +1347,17 @@ function draw() {
     const cx = enemy.x + enemy.w / 2, cy = enemy.y + enemy.h / 2;
     ctx.arc(cx, cy, isWarning ? 9 : 6, 0, Math.PI * 2);
     ctx.fill();
-    // 체력 pip
-    const pipW = 8, gap = 3;
-    const totalW = enemy.hp * pipW + (enemy.hp - 1) * gap;
-    let px = enemy.x + enemy.w / 2 - totalW / 2;
-    for (let i = 0; i < enemy.hp; i++) {
-      ctx.fillStyle = "#ffd54f";
-      ctx.fillRect(px, enemy.y - 12, pipW, 5);
-      px += pipW + gap;
+    // 체력 pip (마름모, 반칸 표현 가능 - drawHpPip 참고). 슬롯 개수는 maxHp 기준으로 고정,
+    // 각 슬롯이 얼마나 채워졌는지는 남은 hp를 슬롯별로 0~1로 잘라서 계산.
+    const pipSize = 11, gap = 4;
+    const pipCount = enemy.maxHp;
+    const totalW = pipCount * pipSize + (pipCount - 1) * gap;
+    let pipCx = enemy.x + enemy.w / 2 - totalW / 2 + pipSize / 2;
+    const pipCy = enemy.y - 12;
+    for (let i = 0; i < pipCount; i++) {
+      const fillRatio = clamp(enemy.hp - i, 0, 1);
+      drawHpPip(pipCx, pipCy, pipSize, fillRatio);
+      pipCx += pipSize + gap;
     }
 
     // 체이서 전용: 공격 예고(선딜레이) 중에는 실제로 맞을 범위를 미리 그려서 보여줌
