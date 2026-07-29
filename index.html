@@ -24,6 +24,7 @@
     background: #2b2f3a;
     display: block;
     image-rendering: pixelated;
+    cursor: crosshair; /* 공격/표류 방향이 마우스 조준이므로 조준경 커서로 표시 */
   }
   #hud {
     position: absolute;
@@ -79,20 +80,6 @@
     width: 0%;
     background: #4fc3f7;
   }
-  #controls {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    font-size: 13px;
-    line-height: 1.6;
-    background: rgba(0,0,0,0.45);
-    padding: 8px 12px;
-    border-radius: 6px;
-    text-align: right;
-    pointer-events: none;
-    user-select: none;
-  }
-  #controls b { color: #ffd54f; }
   #respawnMsg {
     position: absolute;
     top: 50%;
@@ -118,10 +105,6 @@
     <div id="hpText">HP 5 / 5</div>
     <div id="cooldownRow">
       <div class="cdBox">
-        <div class="cdLabel">DASH</div>
-        <div class="cdBarOuter"><div id="dashCdBar" class="cdBarInner"></div></div>
-      </div>
-      <div class="cdBox">
         <div class="cdLabel">ATTACK</div>
         <div class="cdBarOuter"><div id="atkCdBar" class="cdBarInner"></div></div>
       </div>
@@ -131,26 +114,54 @@
       </div>
     </div>
   </div>
-  <div id="controls">
-    <div><b>← →</b> : 이동</div>
-    <div><b>Z</b> : 점프 (이단 점프 가능)</div>
-    <div><b>X</b> : 대쉬 (짧은 무적)</div>
-    <div><b>C</b> : 근접 공격</div>
-    <div><b>V</b> (짧게 탭) : 표류 발동, 고정 시간 후 자동으로 반격</div>
-    <div style="margin-top:6px; font-size:11px; opacity:0.85;">
-      회색 발판: 완전 고정 (아래에서도 못 뚫음)<br>
-      청록색 발판: 아래에서 점프로 관통 가능<br>
-      주황 벽: 구역 내 몬스터를 모두 처치해야 사라짐<br>
-      초록 몬스터: 순찰하다 접근하면 추적 후 근접공격(선딜레이 김)<br>
-      보라색: 근접 공격에 맞아도 스턴(공격 준비 초기화) 안 걸림<br>
-      DRIFT 바: 꽉 차야 표류 발동 가능. 맞으면 0.35초간 화면이 붉게 깜빡이며 유예 - 그 안에 표류를 쓰면 그 피해가 취소되고 축적됨. 표류 중 맞은 피해도 축적되어 종료 시 넓은 범위 반격으로 전환됨 (못 맞으면 자해 1)
-    </div>
-  </div>
   <div id="respawnMsg">Respawn...</div>
 </div>
 
 <script>
 "use strict";
+
+/* =========================================================================
+   게임 개요 - 처음 이 코드를 보는 사람을 위한 지도.
+   =========================================================================
+
+   장르: 가로 스크롤 2D 액션 플랫포머. 좌우 이동 + 이단 점프로 지형을 넘으며
+   포탑/추적 몬스터를 처치하고 봉쇄 벽을 넘어 레벨 끝까지 가는 것이 목표.
+
+   조작 (전부 CONFIG 아래 "입력 처리" 섹션의 WATCHED_KEYS / mousedown 리스너 참고):
+     - A / D          : 좌우 이동
+     - W 또는 Space    : 점프 (이단 점프 가능, 혼용해서 눌러도 됨)
+     - 마우스 좌클릭    : 근접 공격 (판정 방향 = 마우스 커서 방향)
+     - 마우스 우클릭    : 표류(drift) 발동
+     - 마우스 커서      : player.facing(근접 공격 방향)을 매 프레임 결정 - 이동 방향과 무관.
+                         단, 표류 반격은 방향 무관(플레이어 중심 광역 판정)이라 이 값의 영향을 안 받음
+
+   핵심 전투 시스템 3개가 서로 맞물려 있음:
+
+   1) 피격 유예 (anchor 상태, DRIFT_DAMAGE_GRACE_PERIOD)
+      맞아도 즉시 HP가 깎이지 않고 player.pendingDamage에 { amount, timer }로 잠깐 대기한다.
+      화면이 붉게 깜빡이는 동안(유예 중) 반응해서 표류를 쓰면 그 피해가 반격으로 전환되고,
+      아무것도 안 하면 유예가 끝나는 순간 HP에 확정 반영된다. (damagePlayer/applyDamageToHp 참고)
+
+   2) 표류(drift) - "안 맞은 척 버티다가 반격하는" 상태
+      우클릭 한 번으로 DRIFT_DURATION 동안 진입. 표류 중엔 무적이 아니라 계속 맞을 수 있지만,
+      맞은 피해가 HP로 안 가고 전부 pendingDamage에 쌓이기만 한다. 표류가 끝나는 순간(finishDrift):
+        - 쌓인 피해가 있으면 그 총합 * DRIFT_COUNTER_DAMAGE_MULTIPLIER로 넓은 범위 반격 (performDriftCounterAttack)
+        - 하나도 못 쌓았으면 대신 DRIFT_EMPTY_SELF_DAMAGE만큼 자해
+      반격 범위 안의 투사체는 격추되고, 격추한 투사체들의 데미지 총합만큼 "2타"가 짧은 텀을 두고
+      한 번 더 들어간다 (반격 2연타 연출 - 아래 3번 타임스톱과 얽혀 있음).
+      반격 성공 여부에 따라 다음 표류까지의 쿨타임이 달라진다(성공=COUNTER, 실패=WHIFF).
+
+   3) 타임스톱(히트스톱) - 실제로 피해를 입거나 반격이 터지는 "임팩트 있는 순간" 전체를 잠깐 정지
+      loop()에서 timeStopTimer > 0인 동안은 update() 자체를 통째로 건너뛴다 - 플레이어/적/투사체/
+      무적시간/쿨타임 등 게임 로직 전부가 그 프레임엔 얼어붙는다 (화면은 계속 그려서 정지 프레임처럼 보임).
+      이 정지 덕분에 반격 2타 연출(1타 -> 짧은 정지 -> 2타 -> 정식 길이 정지 -> 재개, triggerTimeStop의
+      onComplete 체이닝)이 가능하고, 무적시간도 정지 중엔 같이 멈췄다가 풀리는 순간부터 온전히 흐른다.
+      단, 반격 이펙트(driftBurst)의 페이드만큼은 정지 중에도 실시간으로 흘러야 두 번 때린 게 눈에
+      보이므로 tickDriftBurst()만 따로 매 프레임 호출된다 (updateDrift가 아니라 loop()에서).
+
+   나머지(지형/카메라/적 AI/렌더링)는 아래 각 섹션 헤더를 참고. 밸런스 수치는 전부 CONFIG 하나에
+   모여 있으므로, 로직을 건드리지 않고 숫자만 바꿔서 게임 느낌을 조정할 수 있다.
+   ========================================================================= */
 
 /* =========================================================================
    밸런스 / 튜닝 변수 - 여기서만 수정하면 게임 느낌을 바꿀 수 있습니다.
@@ -163,29 +174,23 @@ const CONFIG = {
   JUMP_FORCE: 760,           // 점프 초기 상승 속도 (px/sec)
   MAX_JUMPS: 2,              // 최대 점프 횟수 (2 = 이단 점프)
 
-  // --- 대쉬 ---
-  DASH_SPEED: 1150,          // 대쉬 중 이동 속도 (px/sec)
-  DASH_DURATION: 0.15,       // 대쉬 지속 시간 (sec)
-  DASH_COOLDOWN: 0.9,        // 대쉬 재사용 대기시간 (sec) - 0.8~1.0 권장
-  DASH_IFRAME_DURATION: 0.18,// 대쉬 시작 시 부여되는 무적시간 (sec)
-
   // --- 근접 공격 ---
-  ATTACK_RANGE_W: 62,        // 공격 판정 가로 크기
-  ATTACK_RANGE_H: 54,        // 공격 판정 세로 크기
+  ATTACK_RANGE_W: 85,        // 공격 판정 가로 크기
+  ATTACK_RANGE_H: 75,        // 공격 판정 세로 크기
   ATTACK_ACTIVE_DURATION: 0.08,  // 판정이 활성화되는 시간 (sec)
   ATTACK_RECOVERY_DURATION: 0.30, // 후딜레이 (sec, 이 동안 재공격 불가)
   ATTACK_DAMAGE: 1,          // 공격 1회당 적에게 주는 데미지
 
   // --- 플레이어 ---
   PLAYER_MAX_HP: 5,
-  HIT_INVINCIBILITY_DURATION: 0.6, // 피격 후 무적시간 (sec)
+  HIT_INVINCIBILITY_DURATION: 0.5, // 피격 후 무적시간 (sec) - HP가 실제로 깎이는 순간(applyDamageToHp)부터 시작
   RESPAWN_DELAY: 1.2,        // 사망 후 리스폰까지 대기시간 (sec)
   PIT_FALL_BUFFER: 60,       // 낙사 판정 여유값 (px) - 화면 아래로 이 정도 더 떨어지면 사망 처리
 
   // --- 적 (포탑) ---
   TURRET_FIRE_INTERVAL: 2.2, // 포탑 발사 주기 (sec, 예고 시작부터 다음 예고 시작까지)
   TURRET_TELEGRAPH_DURATION: 0.5, // 발사 전 "예고" 시간 (sec) - 이 동안 포탑이 경고 표시를 보여줌
-  TURRET_MAX_HP: 3,          // 포탑 체력 (근접 공격 3회에 파괴)
+  TURRET_MAX_HP: 5,          // 포탑 체력 (근접 공격 5회에 파괴)
   PROJECTILE_SPEED: 260,     // 투사체 속도 (px/sec) - 낮을수록 피하기 쉬움
   PROJECTILE_RADIUS: 8,
   PROJECTILE_DAMAGE: 1,
@@ -196,27 +201,76 @@ const CONFIG = {
 
   // --- 적 (추적형 근접 몬스터: 체이서) ---
   CHASER_MAX_HP: 3,
-  CHASER_PATROL_SPEED: 90,   // 평상시 좌우 순찰 속도 (px/sec)
+  CHASER_PATROL_SPEED: 90,   // 평상시 좌우 순찰 속도 (px/sec) - 아그로가 풀려 순찰 위치로 복귀할 때도 이 속도로 걸어감
   CHASER_CHASE_SPEED: 260,   // 플레이어를 인식하고 쫓아갈 때 속도 (px/sec)
-  CHASER_AGGRO_RANGE: 260,   // 이 거리(px) 안에 플레이어가 들어오면 추적 시작 (화면에 한 번 보인 뒤부터)
-  CHASER_LEASH_RANGE: 420,   // 이 거리보다 멀어지면 추적을 포기하고 순찰로 복귀
-  CHASER_VERTICAL_RANGE: 60, // 이 정도 높이 차이 안에 있어야 추적/공격 시작 (세로로 너무 멀면 인식 안 함)
-  CHASER_ATTACK_RANGE_W: 90,  // 근접 공격 판정 가로 크기 (이 거리 안이면 추적을 멈추고 공격 시작)
-  CHASER_ATTACK_RANGE_H: 100, // 근접 공격 판정 세로 크기
-  CHASER_ATTACK_TELEGRAPH_DURATION: 0.9, // 공격 전 선딜레이 (sec) - 플레이어 공격보다 훨씬 길게 잡아서 눈으로 보고 피할 여유를 줌
+
+  // 체이서의 "범위" 세 가지는 서로 다른 목적이라 명확히 분리되어 있다:
+  //  1) 인식 범위 (CHASER_DETECTION_RANGE) - patrol/return 상태에서 플레이어를 처음 발견하고
+  //     추적(chase)을 "시작"하는 거리.
+  //  2) 어그로 범위 (CHASER_LEASH_RANGE) - 이미 추적 중일 때, 이 거리보다 멀어지면 추적을 "포기"하는
+  //     거리. 인식 범위보다 넉넉히 커야 한다 - 안 그러면 딱 경계선에서 왔다갔다하며 계속
+  //     추적 시작/포기를 반복하는 플리커링이 생긴다.
+  //  3) 공격 판정 - 더 이상 단순 거리 비교가 아니라, 실제 공격 히트박스(getChaserAttackHitbox)가
+  //     플레이어 히트박스와 조금이라도 겹치는지로 판단한다 (CHASER_ATTACK_RANGE_W/H는 그 히트박스의
+  //     "크기"만 정의함). 그래서 예를 들어 플레이어가 체이서 머리 위 발판에 서 있어서 거리는
+  //     가까워도 실제로는 안 닿는 상황이면 공격이 시작되지 않는다.
+  CHASER_DETECTION_RANGE: 480,          // 인식 범위 (가로, px)
+  CHASER_DETECTION_VERTICAL_RANGE: 130, // 인식 범위 (세로, px) - 이 정도 높이 차이까지는 발견함
+  CHASER_LEASH_RANGE: 650,              // 어그로 범위 - 추적 중 이 거리보다 멀어지면 포기
+  CHASER_ATTACK_RANGE_W: 130, // 근접 공격 히트박스 가로 크기
+  CHASER_ATTACK_RANGE_H: 130, // 근접 공격 히트박스 세로 크기
+  CHASER_ATTACK_TELEGRAPH_DURATION: 0.65, // 공격 전 선딜레이 (sec) - 플레이어 공격보다 길게 잡아서 눈으로 보고 피할 여유를 줌
   CHASER_ATTACK_RECOVERY_DURATION: 0.6,  // 공격 후딜레이 (sec)
   CHASER_ATTACK_DAMAGE: 2,
   CHASER_STUN_DURATION: 0.5, // 근접 공격에 맞아 스턴되면 이 시간 동안은 사거리 안이어도 재공격(예고) 진입 불가
+  // 체이서는 매 프레임이 아니라 이 주기(sec)마다 한 번씩만 플레이어의 실제 위치를 다시 확인하고,
+  // 그 사이엔 마지막으로 확인한 위치를 그대로 쓴다 - "낮은 fps로 세상을 보는" 것처럼 반응이 뚝뚝 끊겨서
+  // 느리게 느껴지게 하는 연출. (플레이어별 인스턴스 필드 perceptionTimer/perceivedPlayerX/Y로 관리 - makeChaser 참고)
+  // 실제 공격 명중 판정만큼은 항상 지금 이 순간의 진짜 플레이어 위치로 하므로 이 주기와 무관하게 공정하다.
+  CHASER_PERCEPTION_INTERVAL: 0.1,
+
+  // --- 유령 NPC (순수 시각효과, 아무 판정에도 관여 안 함) ---
+  // 플레이어를 바짝 따라다니는 것처럼 보이는 잔상 NPC. 플레이어 위치 히스토리에서 이만큼(sec)
+  // 과거의 위치를 그대로 가져다 그리기만 한다. 아주 짧게 잡아서 거의 붙어 다니는 느낌을 줌.
+  GHOST_NPC_DELAY: 0.05,
 
   // --- 플레이어 표류(drift) 상태 ---
-  // V를 짧게 한 번 탭하면 발동. 홀드/재입력 불필요 - 고정 시간 후 자동 종료 + 자동 반격.
-  DRIFT_DAMAGE_GRACE_PERIOD: 0.35, // anchor 상태에서 맞았을 때, 실제로 HP가 깎이기까지 주는 유예시간 (sec). 이 안에 표류를 발동하면 취소되고 반격으로 축적됨
+  // 마우스 우클릭 한 번으로 발동. 홀드/재입력 불필요 - 고정 시간 후 자동 종료 + 자동 반격.
+  DRIFT_DAMAGE_GRACE_PERIOD: 0.5, // anchor 상태에서 맞았을 때, 실제로 HP가 깎이기까지 주는 유예시간 (sec). 이 안에 표류를 발동하면 취소되고 반격으로 축적됨
   DRIFT_DURATION: 0.4,             // 표류 지속시간 (sec) - 발동 시점부터 이 시간이 지나면 자동 종료
-  DRIFT_COOLDOWN: 1.0,             // 표류가 자동 종료된 시점부터 다시 발동 가능해지기까지의 쿨타임 (sec). 쿨타임 중엔 V 입력 무시
-  DRIFT_ATTACK_RANGE_W: 150,       // 표류 종료 시 자동 발동되는 반격 판정 가로 크기 (평소 근접 공격보다 큼, 플레이어 중심 기준)
-  DRIFT_ATTACK_RANGE_H: 130,       // 표류 종료 시 자동 발동되는 반격 판정 세로 크기
+  // 표류 자체는 무적을 안 준다 (표류 중에도 damagePlayer()가 정상 통과해서 pendingDamage에 계속 쌓여야 하기 때문).
+  // 무적은 표류가 끝나는 순간(finishDrift)에만 HIT_INVINCIBILITY_DURATION만큼 부여되어, 일반 피격 후와 동일한 길이의
+  // "이벤트 직후 유예"를 준다.
+  //
+  // 표류 재발동 쿨타임은 상수로 안 박아두고 아래 두 값으로 "계산"한다 (getDriftCooldownOnCounter/Whiff 참고):
+  // 반격 성공 쿨타임 = HIT_INVINCIBILITY_DURATION + DRIFT_DAMAGE_GRACE_PERIOD + 이 여유값보다 항상 유의미하게 길어야
+  // 한다 - 안 그러면 "반격 후 무적+유예가 끝나기도 전에 벌써 표류를 또 쓸 수 있는" 상황이 생겨서 쿨타임 페널티가
+  // 무의미해진다. HIT_INVINCIBILITY_DURATION이나 DRIFT_DAMAGE_GRACE_PERIOD를 나중에 바꿔도 이 관계가 자동으로 유지됨.
+  DRIFT_COOLDOWN_COUNTER_MARGIN: 0.4,
+  // 자해(반격 실패) 쿨타임 = 위 반격 성공 쿨타임 + 이 여유값. "성공하면 확실히 이득"이 항상 유지되도록,
+  // 둘 사이에 유의미한 차이를 강제하기 위해 고정값이 아니라 성공 쿨타임에 얹는 식으로 계산한다.
+  DRIFT_COOLDOWN_WHIFF_EXTRA: 0.8,
+  DRIFT_ATTACK_RANGE_W: 230,       // 표류 종료 시 자동 발동되는 반격 판정 가로 크기 (평소 근접 공격보다 큼, 플레이어 중심 기준)
+  DRIFT_ATTACK_RANGE_H: 200,       // 표류 종료 시 자동 발동되는 반격 판정 세로 크기
+  DRIFT_COUNTER_DAMAGE_MULTIPLIER: 2, // 반격 1타(축적 피해)와 2타(투사체 흡수) 모두 이 배율만큼 세게 나감
   DRIFT_EMPTY_SELF_DAMAGE: 1,      // 표류 중 아무 피해도 축적하지 못한 채 종료되면 대신 플레이어가 입는 데미지
-  DRIFT_BURST_VISUAL_DURATION: 0.15, // 반격 판정을 화면에 보여주는 시각효과 지속시간 (sec)
+  // 반격 판정을 화면에 보여주는 시각효과 지속시간 (sec). 타임스톱과 달리 실시간으로 흐른다(loop() 참고).
+  // 일부러 HITSTOP_DOUBLE_HIT_GAP보다 짧게 잡아서, 2타로 이어지는 경우 1타의 번쩍임이 완전히
+  // 사라진 뒤에 2타(다른 색)가 다시 번쩍이는 "번쩍-암전-번쩍" 리듬이 나오게 한다 (showDriftBurst 참고).
+  DRIFT_BURST_VISUAL_DURATION: 0.12,
+
+  // --- 타임스톱(히트스톱) --- 이 시간 동안은 게임 전체가 완전히 멈춤(update 자체를 안 돌림).
+  // player.invincibleTimer도 타임스톱 중엔 같이 멈춰있다가
+  // 타임스톱이 끝나고 다시 게임이 돌아가는 시점부터 정상적으로 줄어들기 시작한다 - 즉 이미 있던 무적시간 로직은
+  // 그대로 유지되고, 타임스톱이 끝난 직후부터 온전한 길이만큼 무적이 보장된다.
+  // 실제로 HP가 깎이는 순간(자해 포함)과 표류 반격이 발동되는 순간(몬스터 명중 여부 무관) 둘 다
+  // 같은 길이로 타임스톱이 걸린다. 화면 틴트 색만 원인(damage/counter)에 따라 다르게 표시됨.
+  HITSTOP_DURATION: 0.3,
+  // 반격이 투사체를 격추해 2타로 이어질 때, 1타와 2타 사이에 끼워넣는 짧은 정지 (sec).
+  // DRIFT_BURST_VISUAL_DURATION보다 넉넉히 길게 잡아서, 1타 이펙트가 다 사라지고 나서도
+  // 잠깐의 "정적"이 있은 뒤에 2타가 터지게 한다 - 이 정적이 있어야 두 타격이 분리되어 보인다.
+  // 이 동안에도 게임은 완전히 멈춰있고, 이 시간이 끝나는 순간 2타가 발동한 뒤 HITSTOP_DURATION으로 마무리된다.
+  HITSTOP_DOUBLE_HIT_GAP: 0.66,
 };
 
 /* ========================================================================= */
@@ -226,17 +280,58 @@ const ctx = canvas.getContext("2d");
 const W = canvas.width, H = canvas.height;
 
 // --- 입력 처리 ---
+// 키보드와 마우스 버튼을 같은 코드 체계로 다룬다: 마우스 좌클릭="Mouse0", 우클릭="Mouse2"를
+// 가상의 키코드처럼 취급해서 heldKeys/justPressed와 동일한 파이프라인을 그대로 공유한다.
+//
+// - heldKeys[code]      : 지금 물리적으로 눌려있는지 (연속 입력 - 이동에 사용)
+// - justPressed[code]   : "이번 프레임에 막 눌렀다"는 단발 신호 (탭 입력 - 점프/공격/표류에 사용).
+//                         매 프레임 끝(update() 마지막)에 비워짐.
+// - pendingKeyAfterFreeze[code] : 타임스톱(히트스톱) 도중 눌린 입력은 곧바로 justPressed가 되지 않고
+//                         여기 대기한다. 타임스톱이 끝나는 순간 그 키가 "아직도" 눌려있으면 그제서야
+//                         justPressed로 전환되고, 도중에 뗐으면(heldKeys가 다시 false) 그냥 버려진다
+//                         (loop() 참고) - 즉 타임스톱 중의 입력은 "예약"되지 않는다.
 const heldKeys = {};
 const justPressed = {};
-const WATCHED_KEYS = ["ArrowLeft", "ArrowRight", "KeyZ", "KeyX", "KeyC", "KeyV"];
+const pendingKeyAfterFreeze = {};
+const WATCHED_KEYS = ["KeyA", "KeyD", "KeyW", "Space"]; // 브라우저 기본 동작(스크롤 등)을 막을 키
+
+function handlePress(code) {
+  if (!heldKeys[code]) {
+    if (timeStopTimer > 0) pendingKeyAfterFreeze[code] = true;
+    else justPressed[code] = true;
+  }
+  heldKeys[code] = true;
+}
+function handleRelease(code) {
+  heldKeys[code] = false;
+}
 
 window.addEventListener("keydown", (e) => {
   if (WATCHED_KEYS.includes(e.code)) e.preventDefault();
-  if (!e.repeat && !heldKeys[e.code]) justPressed[e.code] = true;
-  heldKeys[e.code] = true;
+  if (!e.repeat) handlePress(e.code); // heldKeys 가드가 이미 "처음 눌린 순간"만 걸러주므로 repeat 체크는 보조용
 });
-window.addEventListener("keyup", (e) => {
-  heldKeys[e.code] = false;
+window.addEventListener("keyup", (e) => handleRelease(e.code));
+
+// 마우스: 좌클릭=공격, 우클릭=표류. 우클릭 시 브라우저 컨텍스트 메뉴가 뜨지 않게 막는다.
+canvas.addEventListener("mousedown", (e) => {
+  e.preventDefault();
+  if (e.button === 0) handlePress("Mouse0");
+  else if (e.button === 2) handlePress("Mouse2");
+});
+window.addEventListener("mouseup", (e) => {
+  if (e.button === 0) handleRelease("Mouse0");
+  else if (e.button === 2) handleRelease("Mouse2");
+});
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+// 공격 방향(=player.facing)을 결정하는 조준 기준점. 이 게임은 좌우 판정만 쓰므로 x좌표만 추적한다.
+// 캔버스 CSS 픽셀 좌표로 들고 있다가 updatePlayer()에서 카메라 오프셋을 더해 월드 좌표로 바꿔 쓴다
+// (getMouseWorldX 참고).
+let mouseScreenX = W / 2;
+canvas.addEventListener("mousemove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  // 캔버스가 CSS로 확대/축소되어 표시되는 경우를 대비해 실제 캔버스 해상도 기준으로 환산
+  mouseScreenX = (e.clientX - rect.left) * (canvas.width / rect.width);
 });
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -263,6 +358,13 @@ const GROUND_GAPS = [
   { x: 900,  w: 100 },
   { x: 2350, w: 120 },
 ];
+
+// xA와 xB 사이에 낙사 구간이 하나라도 걸쳐 있는지 - 체이서가 구멍 너머까지는 못 쫓아오게 하는 데 씀
+// (체이서는 점프/낙하 판정이 없어서 구멍을 자연스럽게 못 건너기 때문에, 플레이어가 구멍을 넘으면 추적을 포기시킴)
+function hasGapBetween(xA, xB) {
+  const lo = Math.min(xA, xB), hi = Math.max(xA, xB);
+  return GROUND_GAPS.some((gap) => gap.x < hi && gap.x + gap.w > lo);
+}
 
 // 위 GROUND_GAPS를 뺀 나머지 구간으로 바닥 조각들을 만듦
 function buildGroundSegments() {
@@ -323,16 +425,12 @@ const player = {
   x: SPAWN_POINT.x, y: SPAWN_POINT.y,
   w: 34, h: 48,
   vx: 0, vy: 0,
-  facing: 1,
+  facing: 1,        // -1(왼쪽)|1(오른쪽) - 이동 방향이 아니라 마우스 커서 방향으로 매 프레임 갱신됨 (updatePlayer 참고). 공격/반격 판정 방향이 이 값을 그대로 씀
   onGround: false,
   jumpsUsed: 0,
 
   hp: CONFIG.PLAYER_MAX_HP,
   invincibleTimer: 0,
-
-  dashState: "idle",       // idle | dashing
-  dashTimer: 0,
-  dashCooldownTimer: 0,
 
   attackState: "idle",     // idle | active | recovery
   attackTimer: 0,
@@ -340,7 +438,8 @@ const player = {
 
   state: "anchor",         // anchor | drift - 피격 판정에는 영향 없음, "데미지를 축적할지 즉시 적용할지"만 바꾸는 레이어
   driftTimer: 0,           // drift 상태로 진입한 시점부터 DRIFT_DURATION에서 카운트다운, 0이 되면 자동 종료+반격
-  driftCooldownTimer: 0,   // 0이어야 V를 눌러 표류 발동 가능 (표류 자동 종료 시점에 DRIFT_COOLDOWN으로 리셋됨)
+  driftCooldownTimer: 0,   // 0이어야 우클릭으로 표류 발동 가능 (표류 자동 종료 시점에 반격 성공 여부에 따라 getDriftCooldownOnCounter/Whiff 중 하나로 리셋됨)
+  driftCooldownDuration: getDriftCooldownOnWhiff(), // 이번 쿨타임이 총 몇 초짜리였는지 (HUD 게이지가 driftCooldownTimer와 함께 비율을 계산하는 데 씀)
   pendingDamage: [],       // [{ amount, timer }, ...] - 아직 HP에 확정 반영 안 된 피해. anchor 상태에서 맞으면 timer가 DRIFT_DAMAGE_GRACE_PERIOD부터 줄어들다 0이 되면 HP 확정 적용, 그 전에 표류를 발동하면 그대로 축적되어 표류 종료 시 반격 데미지로 전환됨
   driftTrail: [],          // 잔상 표시용 최근 위치 기록 (순수 시각효과, 충돌과 무관)
   driftBurst: null,        // { x, y, w, h, timer } - 표류 종료 시 반격 판정을 잠깐 보여주기 위한 시각효과 상태
@@ -348,6 +447,58 @@ const player = {
 
 let gameState = "playing"; // playing | respawning
 let respawnTimer = 0;
+
+// --- 플레이어 위치 히스토리 (유령 NPC 전용 - 체이서는 이걸 안 쓰고 자체 주기 샘플링을 쓴다. updateChaserAI 참고) ---
+// 매 프레임 { t, x, y }를 오래된 순서로 쌓아두고, "지금부터 N초 전엔 어디 있었나"를 조회할 수 있게 한다.
+// gameClock은 실제 게임 진행 시간(타임스톱 중엔 update가 안 돌아서 자동으로 멈춤).
+let gameClock = 0;
+const playerPositionHistory = [];
+const MAX_TRACKED_POSITION_DELAY = CONFIG.GHOST_NPC_DELAY;
+
+function recordPlayerPositionHistory(dt) {
+  gameClock += dt;
+  playerPositionHistory.push({ t: gameClock, x: player.x, y: player.y });
+  // 어떤 소비자에게도 더는 조회될 일 없는(가장 긴 지연보다도 훨씬 오래된) 기록은 버려서 배열이 안 커지게 함
+  while (playerPositionHistory.length > 1 && playerPositionHistory[1].t < gameClock - MAX_TRACKED_POSITION_DELAY - 0.5) {
+    playerPositionHistory.shift();
+  }
+}
+
+// "지금부터 delay(sec) 전" 시점에 가장 가까운(그 시점 이전 중 가장 최근) 기록을 반환.
+// 히스토리가 아직 그만큼 안 쌓였으면(리스폰 직후 등) 가장 오래된 기록으로 대체.
+function getPerceivedPlayerPos(delay) {
+  if (playerPositionHistory.length === 0) return { x: player.x, y: player.y };
+  const targetT = gameClock - delay;
+  let result = playerPositionHistory[0];
+  for (const entry of playerPositionHistory) {
+    if (entry.t > targetT) break;
+    result = entry;
+  }
+  return result;
+}
+
+// 유령 NPC - 순수 시각효과. 충돌/전투 등 어떤 판정에도 관여하지 않고(관여받지도 않고),
+// 플레이어 위치 히스토리를 GHOST_NPC_DELAY만큼 지연해서 그대로 따라다니기만 한다.
+const ghostNpc = { x: player.x, y: player.y };
+function updateGhostNpc() {
+  const pos = getPerceivedPlayerPos(CONFIG.GHOST_NPC_DELAY);
+  ghostNpc.x = pos.x;
+  ghostNpc.y = pos.y;
+}
+
+// 타임스톱(히트스톱) - 0보다 크면 메인 루프가 update()를 아예 건너뛰어 게임 전체가 얼어붙는다.
+// reason은 화면 틴트 색을 고르는 용도("damage" = 피격 확정, "counter" = 반격 발동).
+// duration으로 비교해서 부여하는 이유: 거의 동시에 두 트리거가 겹쳐도 더 긴/중요한 쪽 표시가 이기도록.
+let timeStopTimer = 0;
+let timeStopDuration = 0; // 이번 타임스톱이 총 몇 초짜리였는지 - 틴트 알파를 비율로 페이드시키는 데 씀
+let timeStopReason = null; // "damage" | "counter" | null
+let timeStopOnComplete = null; // 이번 프리즈 구간이 끝나는 순간 실행할 콜백 - 다음 프리즈 구간으로 이어붙이는 용도(예: 반격 2타)
+function triggerTimeStop(duration, reason, onComplete = null) {
+  timeStopTimer = duration;
+  timeStopDuration = duration;
+  timeStopReason = reason;
+  timeStopOnComplete = onComplete;
+}
 
 /* --------------------------- 적 (포탑 + 체이서 공통) --------------------------- */
 let enemyIdCounter = 0;
@@ -380,9 +531,15 @@ function makeChaser(x, y, patrolHalfRange, stunnable = true) {
     patrolMinX: x - patrolHalfRange,
     patrolMaxX: x + patrolHalfRange,
     facing: 1,
-    aiState: "patrol", // patrol | chase | windup | recovery
+    aiState: "patrol", // patrol | chase | windup | recovery | return(아그로 풀려서 순찰 위치로 걸어 복귀 중)
     attackTimer: 0,
     stunTimer: 0, // 0보다 크면 스턴 상태 - 사거리 안이어도 windup 진입 불가
+    // "낮은 fps 인식" 연출용 - CHASER_PERCEPTION_INTERVAL마다 한 번씩만 아래 두 값을 실제 플레이어
+    // 위치로 다시 채워넣고, 그 사이엔 그대로 둔다 (updateChaserAI 참고). perceptionTimer를 0으로 시작해서
+    // 첫 업데이트 프레임에 바로 한 번 샘플링되게 함.
+    perceptionTimer: 0,
+    perceivedPlayerX: x,
+    perceivedPlayerY: y,
     hp: CONFIG.CHASER_MAX_HP,
     maxHp: CONFIG.CHASER_MAX_HP,
     alive: true,
@@ -421,6 +578,9 @@ function resetEnemies() {
       enemy.aiState = "patrol";
       enemy.attackTimer = 0;
       enemy.stunTimer = 0;
+      enemy.perceptionTimer = 0; // 리스폰 직후 바로 한 번 다시 샘플링되도록
+      enemy.perceivedPlayerX = enemy.spawnX;
+      enemy.perceivedPlayerY = enemy.spawnY;
     } else {
       enemy.telegraphing = false;
       enemy.fireTimer = CONFIG.TURRET_FIRE_INTERVAL * Math.random();
@@ -473,14 +633,9 @@ function startAttack() {
   player.hitEnemiesThisSwing.clear();
 }
 
-function startDash() {
-  const dir = player.facing;
-  player.dashState = "dashing";
-  player.dashTimer = CONFIG.DASH_DURATION;
-  player.dashCooldownTimer = CONFIG.DASH_COOLDOWN;
-  player.vx = dir * CONFIG.DASH_SPEED;
-  player.vy = 0; // 대쉬 중엔 수평 이동만
-  player.invincibleTimer = Math.max(player.invincibleTimer, CONFIG.DASH_IFRAME_DURATION);
+// 카메라 오프셋을 반영해 마우스 커서의 월드 x좌표를 구함 (player.facing 갱신에 씀)
+function getMouseWorldX() {
+  return mouseScreenX + camera.x;
 }
 
 function getAttackHitbox() {
@@ -498,16 +653,16 @@ function respawnPlayer() {
   player.hp = CONFIG.PLAYER_MAX_HP;
   player.jumpsUsed = 0;
   player.invincibleTimer = CONFIG.HIT_INVINCIBILITY_DURATION * 0.5;
-  player.dashState = "idle";
-  player.dashTimer = 0;
   player.attackState = "idle";
   player.state = "anchor";
   player.driftTimer = 0;
   player.driftCooldownTimer = 0;
+  player.driftCooldownDuration = getDriftCooldownOnWhiff();
   player.pendingDamage.length = 0;
   player.driftTrail.length = 0;
   player.driftBurst = null;
   projectiles.length = 0;
+  playerPositionHistory.length = 0; // 죽기 전의 위치가 체이서 반응 지연 히스토리에 남아있지 않도록 초기화
   resetEnemies();
   snapCameraToPlayer(); // 리스폰 지점까지 카메라가 스르륵 끌려오지 않고 즉시 이동
   gameState = "playing";
@@ -516,45 +671,37 @@ function respawnPlayer() {
 function updatePlayer(dt) {
   // --- 타이머 ---
   if (player.invincibleTimer > 0) player.invincibleTimer -= dt;
-  if (player.dashCooldownTimer > 0) player.dashCooldownTimer -= dt;
 
-  // --- 표류 입력 (단발 탭 - keydown 한 번으로 발동, 홀드/keyup 불필요) ---
-  if (justPressed["KeyV"] && player.state === "anchor" && player.driftCooldownTimer <= 0) {
+  // --- 조준 방향: 이동 방향과 무관하게, 매 프레임 마우스 커서가 있는 쪽을 향하도록 갱신.
+  // 근접 공격 판정(getAttackHitbox)이 이 값을 그대로 쓰기 때문에 "왼쪽으로 이동 중이어도
+  // 커서가 오른쪽이면 오른쪽을 공격"이 자동으로 성립한다. (표류 반격은 방향 무관 - 플레이어
+  // 중심 광역 판정이라 facing을 안 쓴다. performDriftCounterAttack 참고)
+  player.facing = getMouseWorldX() < player.x + player.w / 2 ? -1 : 1;
+
+  // --- 표류 입력 (단발 - 우클릭 한 번으로 발동, 홀드/뗄 때 입력 불필요) ---
+  if (justPressed["Mouse2"] && player.state === "anchor" && player.driftCooldownTimer <= 0) {
     startDrift();
   }
   updateDrift(dt);
 
-  // --- 대쉬 입력 ---
-  if (justPressed["KeyX"] && player.dashState === "idle" && player.dashCooldownTimer <= 0) {
-    startDash();
-  }
+  // --- 좌우 이동 (A/D) ---
+  let move = 0;
+  if (heldKeys["KeyA"]) move -= 1;
+  if (heldKeys["KeyD"]) move += 1;
+  player.vx = move * CONFIG.MOVE_SPEED;
 
-  // --- 좌우 이동 ---
-  if (player.dashState === "dashing") {
-    player.dashTimer -= dt;
-    if (player.dashTimer <= 0) {
-      player.dashState = "idle";
-    }
-  } else {
-    let move = 0;
-    if (heldKeys["ArrowLeft"]) move -= 1;
-    if (heldKeys["ArrowRight"]) move += 1;
-    player.vx = move * CONFIG.MOVE_SPEED;
-    if (move !== 0) player.facing = move;
+  // --- 중력 ---
+  player.vy += CONFIG.GRAVITY * dt;
+  if (player.vy > CONFIG.MAX_FALL_SPEED) player.vy = CONFIG.MAX_FALL_SPEED;
 
-    // --- 중력 ---
-    player.vy += CONFIG.GRAVITY * dt;
-    if (player.vy > CONFIG.MAX_FALL_SPEED) player.vy = CONFIG.MAX_FALL_SPEED;
-  }
-
-  // --- 점프 입력 ---
-  if (justPressed["KeyZ"] && player.jumpsUsed < CONFIG.MAX_JUMPS) {
+  // --- 점프 입력 (W 또는 Space, 둘 다 동일하게 동작) ---
+  if ((justPressed["KeyW"] || justPressed["Space"]) && player.jumpsUsed < CONFIG.MAX_JUMPS) {
     player.vy = -CONFIG.JUMP_FORCE;
     player.jumpsUsed += 1;
   }
 
-  // --- 공격 입력 / 상태 ---
-  if (justPressed["KeyC"] && player.attackState === "idle") {
+  // --- 공격 입력 / 상태 (좌클릭) ---
+  if (justPressed["Mouse0"] && player.attackState === "idle") {
     startAttack();
   }
   if (player.attackState === "active") {
@@ -663,13 +810,27 @@ function triggerDeath() {
 // 모든 피격은 일단 player.pendingDamage에 { amount, timer } 로 들어간다 (즉시 HP에 반영되지 않음).
 // anchor 상태에서는 이 timer가 DRIFT_DAMAGE_GRACE_PERIOD부터 매 프레임 줄어들고, 0이 되면 그제서야
 // HP에 확정 반영된다 - 즉 맞아도 짧은 유예시간 동안은 취소 가능한 상태로 남아있다.
-// 이 유예시간 안에 표류(V)를 발동하면 그 순간 timer 감소가 멈춰서 사실상 "확정 취소"되고,
+// 이 유예시간 안에 표류(우클릭)를 발동하면 그 순간 timer 감소가 멈춰서 사실상 "확정 취소"되고,
 // drift 상태에서 받는 피해도 동일하게 pendingDamage에 쌓이기만 한다 (timer는 anchor일 때만 줄어듦).
 // DRIFT_DURATION이 다 되어 표류가 자동 종료되는 순간, 그때까지 남아있던 pendingDamage 합계만큼
 // 넓은 범위 반격을 자동으로 시전한다 (축적된 피해가 없으면 대신 플레이어가 DRIFT_EMPTY_SELF_DAMAGE만큼 자해).
 
+// 표류 재발동 쿨타임 계산 (CONFIG의 DRIFT_COOLDOWN_COUNTER_MARGIN/WHIFF_EXTRA 주석 참고).
+// 상수로 안 박아두고 함수로 계산하는 이유: HIT_INVINCIBILITY_DURATION이나 DRIFT_DAMAGE_GRACE_PERIOD가
+// 나중에 바뀌어도 "반격 성공 쿨타임이 항상 그 둘의 합보다 유의미하게 길다"는 관계가 자동으로 유지되도록.
+function getDriftCooldownOnCounter() {
+  return CONFIG.HIT_INVINCIBILITY_DURATION + CONFIG.DRIFT_DAMAGE_GRACE_PERIOD + CONFIG.DRIFT_COOLDOWN_COUNTER_MARGIN;
+}
+function getDriftCooldownOnWhiff() {
+  return getDriftCooldownOnCounter() + CONFIG.DRIFT_COOLDOWN_WHIFF_EXTRA;
+}
+
+// HP가 실제로 깎이는 유일한 지점 - 무적시간도 여기서 부여한다 (표류 자해로 깎일 때도 동일하게 적용됨).
+// damagePlayer()에서 곧바로 주지 않는 이유: 대기 중인(pending) 피해는 아직 "맞은 것으로 확정"되지 않았기 때문.
 function applyDamageToHp(amount) {
   player.hp -= amount;
+  player.invincibleTimer = Math.max(player.invincibleTimer, CONFIG.HIT_INVINCIBILITY_DURATION);
+  triggerTimeStop(CONFIG.HITSTOP_DURATION, "damage"); // 표류 자해도 이 함수를 거치므로 동일하게 타임스톱 적용됨
   if (player.hp <= 0) {
     player.hp = 0;
     triggerDeath();
@@ -683,24 +844,18 @@ function startDrift() {
   player.state = "drift";
   player.driftTimer = CONFIG.DRIFT_DURATION;
   player.driftTrail.length = 0;
+  // 여기서 무적을 주지 않는다 - 표류 중엔 무적이 damagePlayer()의 가드를 막아버려서
+  // 표류 중 맞은 피해가 pendingDamage에 쌓이지 못하게 되기 때문 (그건 finishDrift에서 따로 처리됨).
 }
 
-// 표류 중 쌓인 피해를 중심으로 플레이어 주변에 넓은 범위 반격을 시전.
-// 평소 근접 공격(getAttackHitbox)과 달리 방향에 관계없이 플레이어를 중심으로 한 광역 판정.
-function performDriftCounterAttack(amount) {
-  const w = CONFIG.DRIFT_ATTACK_RANGE_W, h = CONFIG.DRIFT_ATTACK_RANGE_H;
-  const hitbox = {
-    x: player.x + player.w / 2 - w / 2,
-    y: player.y + player.h / 2 - h / 2,
-    w, h,
-  };
-
+// hitbox 범위 안의 살아있는 적에게 amount만큼 데미지 - 평소 근접 공격과 동일한 스턴 규칙 적용
+// (stunnable이 false인 보라색 몬스터는 면역). 반격 1타/2타가 공유해서 쓰는 공통 로직.
+function applyCounterDamageToEnemies(hitbox, amount) {
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
     if (!rectsOverlap(hitbox, enemy)) continue;
     enemy.hp -= amount;
     enemy.flashTimer = 0.12;
-    // 평소 근접 공격과 동일한 스턴 규칙 적용 (stunnable이 false인 보라색 몬스터는 면역)
     if (enemy.stunnable) {
       if (enemy.type === "chaser") {
         if (enemy.aiState === "windup") {
@@ -715,24 +870,89 @@ function performDriftCounterAttack(amount) {
     }
     if (enemy.hp <= 0) enemy.alive = false;
   }
+}
 
-  player.driftBurst = { x: hitbox.x, y: hitbox.y, w: hitbox.w, h: hitbox.h, timer: CONFIG.DRIFT_BURST_VISUAL_DURATION };
+// variant: "first"(1타, 하늘색) | "bonus"(투사체 흡수로 이어진 2타, 금색) - draw()에서 색 구분에 씀.
+// 색이 다른 이유: 1타/2타가 짧은 시간차로 겹쳐 보일 때도 "어느 타격인지"가 명확히 구분되게 하기 위해서.
+function showDriftBurst(hitbox, variant = "first") {
+  player.driftBurst = { x: hitbox.x, y: hitbox.y, w: hitbox.w, h: hitbox.h, timer: CONFIG.DRIFT_BURST_VISUAL_DURATION, variant };
+}
+
+// driftBurst의 페이드는 일부러 updateDrift(dt)가 아니라 loop()에서 매 프레임 실시간으로 돌린다.
+// 반격 2연타 사이의 짧은 정지(HITSTOP_DOUBLE_HIT_GAP) 동안 게임 로직은 완전히 멈추지만,
+// 이 타이머만큼은 계속 흘러야 1타의 번쩍임이 눈에 보이게 옅어지다가 2타가 다시 확 밝아지는
+// 대비가 생겨서 "두 번 때렸다"는 게 실제로 보인다. update() 안에 있었다면 얼어있는 동안
+// 알파가 전혀 안 줄어들어서 1타/2타 이펙트가 겹쳐 하나처럼 보이는 문제가 있었다.
+function tickDriftBurst(dt) {
+  if (!player.driftBurst) return;
+  player.driftBurst.timer -= dt;
+  if (player.driftBurst.timer <= 0) player.driftBurst = null;
+}
+
+// 표류 중 쌓인 피해를 중심으로 플레이어 주변에 넓은 범위 반격을 시전.
+// 평소 근접 공격(getAttackHitbox)과 달리 방향에 관계없이 플레이어를 중심으로 한 광역 판정.
+//
+// 반격 범위 안의 투사체를 격추했다면, 그 투사체들의 데미지 총합으로 2타가 이어지도록 연출한다:
+//   1타(투사체 격추) -> 짧은 프리즈 -> 2타(격추한 만큼 데미지) -> 원래 길이의 타임스톱 -> 게임 재개.
+// 두 단계 모두 같은 hitbox를 그대로 재사용(어차피 얼어있는 동안 플레이어가 움직일 수 없음).
+// 2타 자체는 투사체를 다시 검사하지 않으므로 3타로 이어질 일이 없다(체인은 여기서 끝).
+function performDriftCounterAttack(amount) {
+  const w = CONFIG.DRIFT_ATTACK_RANGE_W, h = CONFIG.DRIFT_ATTACK_RANGE_H;
+  const hitbox = {
+    x: player.x + player.w / 2 - w / 2,
+    y: player.y + player.h / 2 - h / 2,
+    w, h,
+  };
+
+  // amount/bonusDamage는 "원래" 피해량이고, 실제로 적에게 꽂히는 데미지는 여기서 배율을 곱해서 낸다.
+  applyCounterDamageToEnemies(hitbox, amount * CONFIG.DRIFT_COUNTER_DAMAGE_MULTIPLIER);
+
+  let bonusDamage = 0;
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    if (circleRectOverlap(p.x, p.y, p.r, hitbox)) {
+      bonusDamage += p.damage;
+      projectiles.splice(i, 1);
+    }
+  }
+
+  showDriftBurst(hitbox);
+
+  if (bonusDamage > 0) {
+    // 1타 직후엔 원래보다 짧게 멈춰서 "1타가 있었다"는 걸 눈으로 보여주고,
+    // 그 프리즈가 끝나는 순간(=여전히 게임은 멈춰있는 채로) 2타를 발동한다.
+    triggerTimeStop(CONFIG.HITSTOP_DOUBLE_HIT_GAP, "counter", () => {
+      applyCounterDamageToEnemies(hitbox, bonusDamage * CONFIG.DRIFT_COUNTER_DAMAGE_MULTIPLIER);
+      showDriftBurst(hitbox, "bonus");
+      triggerTimeStop(CONFIG.HITSTOP_DURATION, "counter"); // 2타 이후엔 평소와 동일한 길이로 마무리
+    });
+  } else {
+    triggerTimeStop(CONFIG.HITSTOP_DURATION, "counter");
+  }
 }
 
 // DRIFT_DURATION이 다 되는 순간 자동으로 호출됨 - "시간이 다 되면 자동 종료"가 유일한 종료 트리거.
-// 이 순간부터 DRIFT_COOLDOWN 쿨타임이 시작된다.
+// 이 순간부터 쿨타임(getDriftCooldownOnCounter/Whiff로 계산됨)이 시작된다.
 function finishDrift() {
   const totalDamage = player.pendingDamage.reduce((sum, entry) => sum + entry.amount, 0);
   player.pendingDamage.length = 0;
   player.state = "anchor";
   player.driftTrail.length = 0;
-  player.driftCooldownTimer = CONFIG.DRIFT_COOLDOWN;
 
+  // 표류가 끝나는 이 시점에만 무적을 준다 - 반격이든 자해든(자해는 applyDamageToHp에서 한 번 더 걸리지만
+  // Math.max라 안전함) 결과와 무관하게 "이벤트 직후" 무적시간은 항상 HIT_INVINCIBILITY_DURATION으로 동일.
+  player.invincibleTimer = Math.max(player.invincibleTimer, CONFIG.HIT_INVINCIBILITY_DURATION);
+
+  // 실제로 피해를 쌓아서 반격이 나갔으면(몬스터 명중 여부와 무관) 쿨타임을 짧게 돌려주고,
+  // 아무 피해도 못 쌓아 자해로 끝났으면 페널티로 쿨타임을 길게 문다.
   if (totalDamage > 0) {
     performDriftCounterAttack(totalDamage);
+    player.driftCooldownDuration = getDriftCooldownOnCounter();
   } else {
     applyDamageToHp(CONFIG.DRIFT_EMPTY_SELF_DAMAGE); // 아무 피해도 못 쌓았으면 대신 자해
+    player.driftCooldownDuration = getDriftCooldownOnWhiff();
   }
+  player.driftCooldownTimer = player.driftCooldownDuration;
 }
 
 function updateDrift(dt) {
@@ -751,6 +971,14 @@ function updateDrift(dt) {
         player.pendingDamage.splice(i, 1);
       }
     }
+    // 무적 중엔(이번 루프에서 막 걸렸든 이미 걸려있었든) 대기 중이던 유예 데미지를 전부 무효화한다.
+    // 안 그러면: A에 맞고(유예 시작) 무적이 걸리기 전에 B에도 맞아서(유예 시작) 두 건이 대기하다가,
+    // A의 유예가 먼저 끝나 HP 확정+무적 부여된 뒤에도 B의 유예 타이머는 계속 돌아가다 무적 중에
+    // 끝나버려서 무적을 뚫고 또 HP가 깎이는 문제가 있었음. 루프 뒤에서 한 번 더 검사하므로
+    // 이번 프레임에 어느 항목이 무적을 유발했든 지연 없이 같은 프레임에 나머지가 전부 정리된다.
+    if (player.invincibleTimer > 0) {
+      player.pendingDamage.length = 0;
+    }
   }
 
   if (player.state === "drift") {
@@ -760,16 +988,13 @@ function updateDrift(dt) {
     player.driftTimer -= dt;
     if (player.driftTimer <= 0) finishDrift();
   }
-
-  if (player.driftBurst) {
-    player.driftBurst.timer -= dt;
-    if (player.driftBurst.timer <= 0) player.driftBurst = null;
-  }
+  // driftBurst의 페이드는 tickDriftBurst()에서 실시간으로 처리한다 (여기서 안 하는 이유는 그 함수 주석 참고).
 }
 
 function damagePlayer(amount) {
   if (player.invincibleTimer > 0 || gameState !== "playing") return;
-  player.invincibleTimer = CONFIG.HIT_INVINCIBILITY_DURATION; // 피격 자체(무적시간 부여)는 기존과 동일하게 즉시 적용
+  // 무적시간은 여기서 주지 않는다 (실제로 HP가 깎히는 applyDamageToHp에서 부여됨) - 그래야
+  // 유예시간/표류 중에 또 맞은 피해도 무적에 막히지 않고 pendingDamage에 쌓여 반격에 반영된다.
   // 즉시 HP를 깎지 않고 항상 유예 상태로 들어간다. anchor 상태면 updateDrift에서 timer가 줄어들다 확정되고,
   // drift 상태면 timer가 아예 줄어들지 않아 표류 종료 시까지 그대로 반격 축적량으로 남는다.
   player.pendingDamage.push({ amount, timer: CONFIG.DRIFT_DAMAGE_GRACE_PERIOD });
@@ -800,6 +1025,7 @@ function updateTurretAI(enemy, dt) {
       vx: (dx / len) * CONFIG.PROJECTILE_SPEED,
       vy: (dy / len) * CONFIG.PROJECTILE_SPEED,
       r: CONFIG.PROJECTILE_RADIUS,
+      damage: CONFIG.PROJECTILE_DAMAGE, // 투사체별로 들고 있어서, 나중에 다른 데미지의 투사체가 생겨도 그대로 대응 가능
     });
   }
 }
@@ -807,33 +1033,48 @@ function updateTurretAI(enemy, dt) {
 function updateChaserAI(enemy, dt) {
   if (enemy.stunTimer > 0) enemy.stunTimer -= dt;
 
+  // "낮은 fps로 세상을 보는" 연출 - CHASER_PERCEPTION_INTERVAL마다 한 번씩만 실제 플레이어 위치로
+  // 다시 채워넣고, 그 사이 프레임들에서는 이 값을 그대로 재사용한다 (아래 모든 인식/추적 판단이 이 값 기준).
+  enemy.perceptionTimer -= dt;
+  if (enemy.perceptionTimer <= 0) {
+    enemy.perceptionTimer = CONFIG.CHASER_PERCEPTION_INTERVAL;
+    enemy.perceivedPlayerX = player.x;
+    enemy.perceivedPlayerY = player.y;
+  }
+
   const enemyCenterX = enemy.x + enemy.w / 2, enemyCenterY = enemy.y + enemy.h / 2;
-  const playerCenterX = player.x + player.w / 2, playerCenterY = player.y + player.h / 2;
-  const dist = Math.abs(playerCenterX - enemyCenterX);
-  const verticalDist = Math.abs(playerCenterY - enemyCenterY);
-  const withinVerticalRange = verticalDist <= CONFIG.CHASER_VERTICAL_RANGE;
+  const perceivedCenterX = enemy.perceivedPlayerX + player.w / 2, perceivedCenterY = enemy.perceivedPlayerY + player.h / 2;
+  const dist = Math.abs(perceivedCenterX - enemyCenterX);
+  const verticalDist = Math.abs(perceivedCenterY - enemyCenterY);
+  // 인식 범위: 가로/세로 둘 다 안에 들어와야 "발견"한 것으로 침 (patrol/return 양쪽에서 공용으로 씀)
+  const withinDetectionRange = dist <= CONFIG.CHASER_DETECTION_RANGE && verticalDist <= CONFIG.CHASER_DETECTION_VERTICAL_RANGE;
 
   if (enemy.aiState === "patrol") {
     enemy.x += enemy.facing * CONFIG.CHASER_PATROL_SPEED * dt;
     if (enemy.x <= enemy.patrolMinX) { enemy.x = enemy.patrolMinX; enemy.facing = 1; }
     else if (enemy.x >= enemy.patrolMaxX) { enemy.x = enemy.patrolMaxX; enemy.facing = -1; }
 
-    // 가로 거리뿐 아니라 세로로도 어느 정도 같은 높이에 있어야 인식하고 추적을 시작함
-    if (dist <= CONFIG.CHASER_AGGRO_RANGE && withinVerticalRange) enemy.aiState = "chase";
+    if (withinDetectionRange) enemy.aiState = "chase";
     return;
   }
 
   if (enemy.aiState === "chase") {
-    if (dist > CONFIG.CHASER_LEASH_RANGE) { enemy.aiState = "patrol"; return; }
+    // 어그로 범위(가죽끈) 밖으로 멀어졌거나, 플레이어가 낙사 구간 너머로 건너가버렸으면(체이서는
+    // 구멍을 못 건너므로) 추적을 포기하고 순찰 위치로 돌아간다.
+    if (dist > CONFIG.CHASER_LEASH_RANGE || hasGapBetween(enemyCenterX, perceivedCenterX)) {
+      enemy.aiState = "return";
+      return;
+    }
 
-    const dir = playerCenterX < enemyCenterX ? -1 : 1;
+    const dir = perceivedCenterX < enemyCenterX ? -1 : 1;
     enemy.facing = dir;
 
     if (enemy.stunTimer > 0) {
       // 스턴 중에는 그 자리에 멈춰 서 있음 (사거리 안이어도 예고 진입 불가 - 계속 때리면 영원히 공격을 못 함)
-    } else if (dist <= CONFIG.CHASER_ATTACK_RANGE_W && withinVerticalRange) {
-      // 가로/세로 모두 사거리 안에 들어옴 - 이동을 멈추고 긴 선딜레이(예고) 시작.
-      // 이 순간의 방향으로 고정 - 예고가 끝날 때까지 플레이어가 반대편으로 가도 안 바뀜 (미리 보여준 범위를 그대로 지킴)
+    } else if (rectsOverlap(getChaserAttackHitbox(enemy), player)) {
+      // 공격 판정은 거리 계산이 아니라 실제 히트박스 겹침으로 결정한다 - 그래야 발판 위처럼 거리는
+      // 가까워도 실제로는 안 닿는 상황에서 헛스윙(예고)이 시작되지 않는다. player는 인식 지연과
+      // 무관하게 항상 "지금 실제" 위치를 쓴다 (반응이 느린 것과 판정이 불공정한 건 별개 문제라서).
       enemy.aiState = "windup";
       enemy.attackTimer = CONFIG.CHASER_ATTACK_TELEGRAPH_DURATION;
     } else {
@@ -860,7 +1101,30 @@ function updateChaserAI(enemy, dt) {
   if (enemy.aiState === "recovery") {
     enemy.attackTimer -= dt;
     if (enemy.attackTimer <= 0) {
-      enemy.aiState = dist <= CONFIG.CHASER_LEASH_RANGE ? "chase" : "patrol";
+      enemy.aiState = dist <= CONFIG.CHASER_LEASH_RANGE ? "chase" : "return";
+    }
+    return;
+  }
+
+  if (enemy.aiState === "return") {
+    // 복귀 도중에 인식 범위 안에 플레이어가 다시 들어오면 즉시 재추적한다 (어그로 범위가 아니라
+    // 인식 범위 기준 - 어그로 범위로 하면 훨씬 넓어서 복귀 중에 거의 항상 재감지되어 버림).
+    if (withinDetectionRange) {
+      enemy.aiState = "chase";
+      return;
+    }
+
+    // 순간이동하지 않고, 순찰 속도 그대로 걸어서 순찰 범위로 복귀한다.
+    // 이미 순찰 범위 안이면(예: 어그로 범위 안에서 풀린 경우) 바로 순찰로 전환됨.
+    if (enemy.x < enemy.patrolMinX) {
+      enemy.facing = 1;
+      enemy.x = Math.min(enemy.patrolMinX, enemy.x + CONFIG.CHASER_PATROL_SPEED * dt);
+    } else if (enemy.x > enemy.patrolMaxX) {
+      enemy.facing = -1;
+      enemy.x = Math.max(enemy.patrolMaxX, enemy.x - CONFIG.CHASER_PATROL_SPEED * dt);
+    }
+    if (enemy.x >= enemy.patrolMinX && enemy.x <= enemy.patrolMaxX) {
+      enemy.aiState = "patrol";
     }
   }
 }
@@ -900,7 +1164,7 @@ function updateProjectiles(dt) {
     if (gameState === "playing" &&
         circleRectOverlap(p.x, p.y, p.r, player) &&
         player.invincibleTimer <= 0) {
-      damagePlayer(CONFIG.PROJECTILE_DAMAGE);
+      damagePlayer(p.damage);
       projectiles.splice(i, 1);
     }
   }
@@ -913,6 +1177,8 @@ function update(dt) {
     if (respawnTimer <= 0) respawnPlayer();
   } else {
     updatePlayer(dt);
+    recordPlayerPositionHistory(dt); // 체이서 AI + 유령 NPC가 참고할 "약간 과거의" 플레이어 위치 기록
+    updateGhostNpc();
     updateEnemies(dt);
     updateProjectiles(dt);
   }
@@ -1034,6 +1300,21 @@ function draw() {
     ctx.fillRect(hb.x, hb.y, hb.w, hb.h);
   }
 
+  // 유령 NPC - 순수 시각효과, 아무 판정에도 안 걸림. 플레이어를 GHOST_NPC_DELAY만큼 지연해서 바짝
+  // 따라다니기만 함. 플레이어의 절반 크기로 그리되, 발 위치(바닥)와 가로 중심은 맞춰서 "작은 동료가
+  // 같은 자리에 서 있는" 것처럼 보이게 한다. 옅은 보랏빛 반투명이라 의식해서 보면 확실히 보이지만
+  // 몬스터/투사체 색과 안 겹치고 채도도 낮아서 전투 중 시선을 크게 뺏지는 않는다.
+  // 플레이어보다 먼저 그려서 겹칠 땐 항상 플레이어가 위에 보임.
+  if (gameState === "playing") {
+    const ghostW = player.w * 0.5, ghostH = player.h * 0.5;
+    const ghostDrawX = ghostNpc.x + (player.w - ghostW) / 2;
+    const ghostDrawY = ghostNpc.y + (player.h - ghostH); // 바닥(발) 위치 정렬
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = "#b39ddb";
+    ctx.fillRect(ghostDrawX, ghostDrawY, ghostW, ghostH);
+    ctx.globalAlpha = 1;
+  }
+
   // 플레이어
   if (gameState === "playing") {
     // 표류 잔상 - 별도 오브젝트/히트박스 아님, 본체 위치 기록을 흐리게 겹쳐 그리는 순수 시각효과
@@ -1048,8 +1329,7 @@ function draw() {
     }
 
     let color = "#4fc3f7";
-    if (player.dashState === "dashing") color = "#81d4fa";
-    else if (player.invincibleTimer > 0 && Math.floor(performance.now() / 60) % 2 === 0) color = "#ffffff";
+    if (player.invincibleTimer > 0 && Math.floor(performance.now() / 60) % 2 === 0) color = "#ffffff";
 
     ctx.globalAlpha = player.state === "drift" ? 0.55 : 1; // 표류 중엔 본체도 살짝 반투명
     drawRect(player, color);
@@ -1076,13 +1356,17 @@ function draw() {
     }
   }
 
-  // 표류 종료 시 자동 반격 판정을 잠깐 보여주는 시각효과 (월드 좌표계 - 카메라와 함께 스크롤)
+  // 표류 반격 판정을 잠깐 보여주는 시각효과 (월드 좌표계 - 카메라와 함께 스크롤).
+  // 터질 때 확 밝았다가 그라데이션으로 점점 옅어짐 - 실시간으로 페이드되므로(tickDriftBurst)
+  // DRIFT_BURST_VISUAL_DURATION이 HITSTOP_DOUBLE_HIT_GAP보다 짧게 잡혀있어서, 2연타의 경우
+  // 1타(하늘색)가 완전히 사라진 뒤 잠깐의 암전을 거쳐 2타(금색)가 다시 확 밝아지는 게 눈에 보인다.
   if (player.driftBurst) {
     const b = player.driftBurst;
     const alpha = clamp(b.timer / CONFIG.DRIFT_BURST_VISUAL_DURATION, 0, 1);
-    ctx.fillStyle = `rgba(255,255,255,${0.5 * alpha})`;
+    const strokeRGB = b.variant === "bonus" ? "255,193,7" : "79,195,247"; // 2타=금색, 1타=하늘색
+    ctx.fillStyle = `rgba(255,255,255,${0.65 * alpha})`;
     ctx.fillRect(b.x, b.y, b.w, b.h);
-    ctx.strokeStyle = `rgba(79,195,247,${0.9 * alpha})`;
+    ctx.strokeStyle = `rgba(${strokeRGB},${alpha})`;
     ctx.lineWidth = 3;
     ctx.strokeRect(b.x, b.y, b.w, b.h);
   }
@@ -1091,7 +1375,7 @@ function draw() {
   // ===== 여기부터 다시 화면(screen) 좌표계 =====
 
   // 유예시간 경고 - anchor 상태에서 맞아서 아직 확정 안 된 피해가 있으면 화면이 붉게 깜빡임.
-  // 이 깜빡임이 보이는 동안 표류(V)를 쓰면 지금 깜빡이는 피해가 취소되고 반격으로 축적된다.
+  // 이 깜빡임이 보이는 동안 표류(우클릭)를 쓰면 지금 깜빡이는 피해가 취소되고 반격으로 축적된다.
   if (gameState === "playing" && player.state === "anchor" && player.pendingDamage.length > 0) {
     const pulse = (Math.sin(performance.now() / 60) + 1) / 2;
     const alpha = 0.15 + 0.25 * pulse;
@@ -1099,9 +1383,23 @@ function draw() {
     ctx.fillRect(0, 0, W, H);
   }
 
-  // 표류 중 화면 틴트 - 연파랑으로 물들여서 "지금 표류 상태"임을 화면 전체에서 바로 알 수 있게
+  // 표류 중 화면 틴트 - 연파랑으로 "지금 표류 상태"임을 알려주되, 축적된 피해가 있으면(=지금 끝나도
+  // 자해 대신 반격이 나감, 안전한 상태) 더 진한 파랑으로 구분해서 보여줌.
   if (gameState === "playing" && player.state === "drift") {
-    ctx.fillStyle = "rgba(79,195,247,0.22)";
+    const hasAccumulatedDamage = player.pendingDamage.length > 0;
+    ctx.fillStyle = hasAccumulatedDamage ? "rgba(41,121,255,0.38)" : "rgba(79,195,247,0.22)";
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // 타임스톱 원인별 화면 틴트 - 위의 옅은 틴트들 위에 덧씌워서 그 순간만 확 진해지는 느낌을 줌.
+  // 피격 확정(damage)은 더 강한 빨강, 반격 발동(counter)은 더 강한 파랑. 타임스톱 잔여시간 비율로 페이드.
+  if (timeStopTimer > 0 && timeStopReason) {
+    const fade = clamp(timeStopTimer / timeStopDuration, 0, 1);
+    if (timeStopReason === "damage") {
+      ctx.fillStyle = `rgba(255,23,23,${0.55 * fade})`;
+    } else {
+      ctx.fillStyle = `rgba(41,121,255,${0.5 * fade})`;
+    }
     ctx.fillRect(0, 0, W, H);
   }
 
@@ -1112,7 +1410,6 @@ function draw() {
 /* --------------------------- HUD --------------------------- */
 const hpBarInner = document.getElementById("hpBarInner");
 const hpText = document.getElementById("hpText");
-const dashCdBar = document.getElementById("dashCdBar");
 const atkCdBar = document.getElementById("atkCdBar");
 const driftCdBar = document.getElementById("driftCdBar");
 const respawnMsg = document.getElementById("respawnMsg");
@@ -1122,12 +1419,16 @@ function updateHud() {
   hpBarInner.style.width = (hpRatio * 100) + "%";
   hpText.textContent = `HP ${Math.max(0, player.hp)} / ${CONFIG.PLAYER_MAX_HP}`;
 
-  const dashRatio = 1 - clamp(player.dashCooldownTimer / CONFIG.DASH_COOLDOWN, 0, 1);
-  dashCdBar.style.width = (dashRatio * 100) + "%";
-  dashCdBar.style.background = dashRatio >= 1 ? "#4fc3f7" : "#555";
-
-  const atkCooldownActive = player.attackState !== "idle";
-  const atkRatio = atkCooldownActive ? 0 : 1;
+  // 판정 활성(active) 중엔 항상 0% - 재사용 불가 구간이라 진행률을 보여줄 필요가 없음.
+  // recovery 진입부터 ATTACK_RECOVERY_DURATION을 기준으로 게이지가 차오름.
+  let atkRatio;
+  if (player.attackState === "active") {
+    atkRatio = 0;
+  } else if (player.attackState === "recovery") {
+    atkRatio = 1 - clamp(player.attackTimer / CONFIG.ATTACK_RECOVERY_DURATION, 0, 1);
+  } else {
+    atkRatio = 1;
+  }
   atkCdBar.style.width = (atkRatio * 100) + "%";
   atkCdBar.style.background = atkRatio >= 1 ? "#ffb74d" : "#555";
 
@@ -1137,7 +1438,7 @@ function updateHud() {
     driftCdBar.style.width = "100%";
     driftCdBar.style.background = "#ba68c8";
   } else {
-    const driftReadyRatio = 1 - clamp(player.driftCooldownTimer / CONFIG.DRIFT_COOLDOWN, 0, 1);
+    const driftReadyRatio = 1 - clamp(player.driftCooldownTimer / player.driftCooldownDuration, 0, 1);
     driftCdBar.style.width = (driftReadyRatio * 100) + "%";
     driftCdBar.style.background = driftReadyRatio >= 1 ? "#7e57c2" : "#555";
   }
@@ -1153,7 +1454,28 @@ function loop(now) {
   lastTime = now;
   dt = Math.min(dt, 0.033); // 탭 전환 등으로 인한 프레임 급증 방지
 
-  update(dt);
+  if (timeStopTimer > 0) {
+    // update() 자체를 건너뛴다 - 플레이어/적/투사체/무적시간 등 모든 타이머가 이 프레임엔 그대로 정지.
+    // 화면은 계속 그려서(draw) "멈춘 순간"이 화면에 정지 프레임으로 보이게 한다.
+    timeStopTimer = Math.max(0, timeStopTimer - dt);
+    if (timeStopTimer <= 0) {
+      timeStopReason = null;
+      // 타임스톱 도중 눌렸던 키가 지금도 눌려있으면 지금 막 누른 것으로 쳐서 이번 프레임에 바로 반영.
+      // 이미 떼버린 키는 pendingKeyAfterFreeze에 남아있어도 heldKeys가 false라 무시됨.
+      for (const code in pendingKeyAfterFreeze) {
+        if (heldKeys[code]) justPressed[code] = true;
+        delete pendingKeyAfterFreeze[code];
+      }
+      // 이 프리즈 구간에 이어붙일 다음 동작(예: 반격 2타)이 있으면 실행 - 그 안에서 triggerTimeStop을
+      // 다시 호출하면 화면이 안 풀리고 바로 다음 프리즈 구간으로 넘어간다.
+      const onComplete = timeStopOnComplete;
+      timeStopOnComplete = null;
+      if (onComplete) onComplete();
+    }
+  } else {
+    update(dt);
+  }
+  tickDriftBurst(dt); // 타임스톱 여부와 무관하게 항상 실시간으로 흐름 (이유는 tickDriftBurst 주석 참고)
   draw();
 
   requestAnimationFrame(loop);
