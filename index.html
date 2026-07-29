@@ -47,22 +47,6 @@
     background: linear-gradient(#ff5c5c, #c62828);
     transition: width 0.12s linear;
   }
-  #hpPendingOverlay {
-    position: absolute;
-    top: 0;
-    height: 100%;
-    width: 0%;
-    left: 0%;
-    background: repeating-linear-gradient(
-      45deg,
-      rgba(255,205,150,0.75),
-      rgba(255,205,150,0.75) 6px,
-      rgba(255,235,205,0.55) 6px,
-      rgba(255,235,205,0.55) 12px
-    );
-    display: none;
-    pointer-events: none;
-  }
   #hpText {
     font-size: 13px;
     margin-top: 3px;
@@ -130,7 +114,6 @@
   <div id="hud">
     <div id="hpBarOuter">
       <div id="hpBarInner"></div>
-      <div id="hpPendingOverlay"></div>
     </div>
     <div id="hpText">HP 5 / 5</div>
     <div id="cooldownRow">
@@ -153,14 +136,14 @@
     <div><b>Z</b> : 점프 (이단 점프 가능)</div>
     <div><b>X</b> : 대쉬 (짧은 무적)</div>
     <div><b>C</b> : 근접 공격</div>
-    <div><b>V</b> (누르고 있기) : 표류, 떼면 즉시 복귀</div>
+    <div><b>V</b> (짧게 탭) : 표류 발동, 고정 시간 후 자동으로 반격</div>
     <div style="margin-top:6px; font-size:11px; opacity:0.85;">
       회색 발판: 완전 고정 (아래에서도 못 뚫음)<br>
       청록색 발판: 아래에서 점프로 관통 가능<br>
       주황 벽: 구역 내 몬스터를 모두 처치해야 사라짐<br>
       초록 몬스터: 순찰하다 접근하면 추적 후 근접공격(선딜레이 김)<br>
       보라색: 근접 공격에 맞아도 스턴(공격 준비 초기화) 안 걸림<br>
-      DRIFT 바: 꽉 차야 표류 가능, 복귀 직후 쿨타임 동안 다시 채워짐
+      DRIFT 바: 꽉 차야 표류 발동 가능. 표류 중 맞은 피해는 축적되어 종료 시 넓은 범위 반격으로 전환됨 (못 맞으면 자해 1)
     </div>
   </div>
   <div id="respawnMsg">Respawn...</div>
@@ -222,12 +205,17 @@ const CONFIG = {
   CHASER_ATTACK_RANGE_H: 100, // 근접 공격 판정 세로 크기
   CHASER_ATTACK_TELEGRAPH_DURATION: 0.9, // 공격 전 선딜레이 (sec) - 플레이어 공격보다 훨씬 길게 잡아서 눈으로 보고 피할 여유를 줌
   CHASER_ATTACK_RECOVERY_DURATION: 0.6,  // 공격 후딜레이 (sec)
-  CHASER_ATTACK_DAMAGE: 1,
+  CHASER_ATTACK_DAMAGE: 2,
   CHASER_STUN_DURATION: 0.5, // 근접 공격에 맞아 스턴되면 이 시간 동안은 사거리 안이어도 재공격(예고) 진입 불가
 
   // --- 플레이어 표류(drift) 상태 ---
-  DRIFT_DAMAGE_GRACE_PERIOD: 0.35, // 표류 중 피격 시, 실제로 체력이 깎이기까지의 유예시간 (sec)
-  DRIFT_COOLDOWN: 1.2,             // V를 떼서 고정 복귀한 순간부터 다시 표류 가능해지기까지의 쿨타임 (sec)
+  // V를 짧게 한 번 탭하면 발동. 홀드/재입력 불필요 - 고정 시간 후 자동 종료 + 자동 반격.
+  DRIFT_DURATION: 0.4,             // 표류 지속시간 (sec) - 발동 시점부터 이 시간이 지나면 자동 종료
+  DRIFT_COOLDOWN: 1.0,             // 표류가 자동 종료된 시점부터 다시 발동 가능해지기까지의 쿨타임 (sec). 쿨타임 중엔 V 입력 무시
+  DRIFT_ATTACK_RANGE_W: 150,       // 표류 종료 시 자동 발동되는 반격 판정 가로 크기 (평소 근접 공격보다 큼, 플레이어 중심 기준)
+  DRIFT_ATTACK_RANGE_H: 130,       // 표류 종료 시 자동 발동되는 반격 판정 세로 크기
+  DRIFT_EMPTY_SELF_DAMAGE: 1,      // 표류 중 아무 피해도 축적하지 못한 채 종료되면 대신 플레이어가 입는 데미지
+  DRIFT_BURST_VISUAL_DURATION: 0.15, // 반격 판정을 화면에 보여주는 시각효과 지속시간 (sec)
 };
 
 /* ========================================================================= */
@@ -349,10 +337,12 @@ const player = {
   attackTimer: 0,
   hitEnemiesThisSwing: new Set(),
 
-  state: "anchor",         // anchor | drift - 피격 판정에는 영향 없음, "데미지 적용 시점"만 바꾸는 레이어
-  driftCooldownTimer: 0,   // 0이어야 V를 눌러 표류에 진입 가능 (V를 떼는 순간 DRIFT_COOLDOWN으로 리셋됨)
-  pendingDamage: [],       // [{ amount, timer }] - drift 중 맞았지만 아직 실제로 적용 안 된 데미지
+  state: "anchor",         // anchor | drift - 피격 판정에는 영향 없음, "데미지를 축적할지 즉시 적용할지"만 바꾸는 레이어
+  driftTimer: 0,           // drift 상태로 진입한 시점부터 DRIFT_DURATION에서 카운트다운, 0이 되면 자동 종료+반격
+  driftCooldownTimer: 0,   // 0이어야 V를 눌러 표류 발동 가능 (표류 자동 종료 시점에 DRIFT_COOLDOWN으로 리셋됨)
+  pendingDamage: [],       // [amount, ...] - drift 중 맞아서 축적된 피해량. 종료 시 합산되어 반격 데미지로 전환됨
   driftTrail: [],          // 잔상 표시용 최근 위치 기록 (순수 시각효과, 충돌과 무관)
+  driftBurst: null,        // { x, y, w, h, timer } - 표류 종료 시 반격 판정을 잠깐 보여주기 위한 시각효과 상태
 };
 
 let gameState = "playing"; // playing | respawning
@@ -511,9 +501,11 @@ function respawnPlayer() {
   player.dashTimer = 0;
   player.attackState = "idle";
   player.state = "anchor";
+  player.driftTimer = 0;
   player.driftCooldownTimer = 0;
   player.pendingDamage.length = 0;
   player.driftTrail.length = 0;
+  player.driftBurst = null;
   projectiles.length = 0;
   resetEnemies();
   snapCameraToPlayer(); // 리스폰 지점까지 카메라가 스르륵 끌려오지 않고 즉시 이동
@@ -525,13 +517,9 @@ function updatePlayer(dt) {
   if (player.invincibleTimer > 0) player.invincibleTimer -= dt;
   if (player.dashCooldownTimer > 0) player.dashCooldownTimer -= dt;
 
-  // --- 표류 입력 (누르고 있는 동안 표류, 떼는 순간 즉시 고정 복귀 - 별도의 "다시 눌러서 복귀" 없음) ---
-  if (heldKeys["KeyV"]) {
-    if (player.state === "anchor" && player.driftCooldownTimer <= 0) {
-      player.state = "drift";
-    }
-  } else if (player.state === "drift") {
-    returnToAnchor(); // 키를 뗀 이 순간이 곧 복귀 트리거이자 쿨타임 시작 시점
+  // --- 표류 입력 (단발 탭 - keydown 한 번으로 발동, 홀드/keyup 불필요) ---
+  if (justPressed["KeyV"] && player.state === "anchor" && player.driftCooldownTimer <= 0) {
+    startDrift();
   }
   updateDrift(dt);
 
@@ -671,9 +659,10 @@ function triggerDeath() {
 
 /* --------------------------- 표류(drift) 상태 --------------------------- */
 // 핵심: 피격 판정(충돌 감지)은 표류 중에도 항상 본체의 실제 좌표 기준으로 그대로 동작한다 (안 바뀜).
-// 바뀌는 건 damagePlayer()가 호출된 뒤 "언제 실제로 HP가 깎이는지" 뿐이다.
-// 대기 중인 피격은 player.pendingDamage 배열에 { amount, timer } 형태로 쌓이고,
-// 유예시간(timer)이 다 되면 이 아래 applyDamageToHp()를 통해 실제 HP에 반영된다.
+// 바뀌는 건 damagePlayer()가 호출된 뒤 "그 피해가 즉시 HP에 적용되는지, 축적되었다가 반격으로 전환되는지" 뿐이다.
+// 표류 중 받은 피해는 player.pendingDamage 배열에 amount로 쌓이고, HP에서는 전혀 깎이지 않는다.
+// DRIFT_DURATION이 다 되어 표류가 자동 종료되는 순간, 축적된 합계만큼 넓은 범위 반격을 자동으로 시전한다
+// (축적된 피해가 없으면 대신 플레이어가 DRIFT_EMPTY_SELF_DAMAGE만큼 자해).
 
 function applyDamageToHp(amount) {
   player.hp -= amount;
@@ -683,14 +672,62 @@ function applyDamageToHp(amount) {
   }
 }
 
-// V를 떼서 표류를 그만두는 순간에만 호출됨 (홀드 입력이라 "다시 눌러서 복귀"는 없음).
-// "복귀하는 순간, 아직 안 터진 대기 데미지는 전부 무효화" 규칙이 여기 한 곳에만 있으면 됨.
-// 동시에 이 순간부터 DRIFT_COOLDOWN 쿨타임이 시작된다.
-function returnToAnchor() {
+// V 탭 한 번으로 호출됨. 쿨타임 중엔 updatePlayer에서 애초에 호출되지 않음.
+function startDrift() {
+  player.state = "drift";
+  player.driftTimer = CONFIG.DRIFT_DURATION;
+  player.pendingDamage.length = 0;
+  player.driftTrail.length = 0;
+}
+
+// 표류 중 쌓인 피해를 중심으로 플레이어 주변에 넓은 범위 반격을 시전.
+// 평소 근접 공격(getAttackHitbox)과 달리 방향에 관계없이 플레이어를 중심으로 한 광역 판정.
+function performDriftCounterAttack(amount) {
+  const w = CONFIG.DRIFT_ATTACK_RANGE_W, h = CONFIG.DRIFT_ATTACK_RANGE_H;
+  const hitbox = {
+    x: player.x + player.w / 2 - w / 2,
+    y: player.y + player.h / 2 - h / 2,
+    w, h,
+  };
+
+  for (const enemy of enemies) {
+    if (!enemy.alive) continue;
+    if (!rectsOverlap(hitbox, enemy)) continue;
+    enemy.hp -= amount;
+    enemy.flashTimer = 0.12;
+    // 평소 근접 공격과 동일한 스턴 규칙 적용 (stunnable이 false인 보라색 몬스터는 면역)
+    if (enemy.stunnable) {
+      if (enemy.type === "chaser") {
+        if (enemy.aiState === "windup") {
+          enemy.aiState = "chase";
+          enemy.attackTimer = 0;
+        }
+        enemy.stunTimer = CONFIG.CHASER_STUN_DURATION;
+      } else {
+        enemy.fireTimer = CONFIG.TURRET_FIRE_INTERVAL;
+        enemy.telegraphing = false;
+      }
+    }
+    if (enemy.hp <= 0) enemy.alive = false;
+  }
+
+  player.driftBurst = { x: hitbox.x, y: hitbox.y, w: hitbox.w, h: hitbox.h, timer: CONFIG.DRIFT_BURST_VISUAL_DURATION };
+}
+
+// DRIFT_DURATION이 다 되는 순간 자동으로 호출됨 - "시간이 다 되면 자동 종료"가 유일한 종료 트리거.
+// 이 순간부터 DRIFT_COOLDOWN 쿨타임이 시작된다.
+function finishDrift() {
+  const totalDamage = player.pendingDamage.reduce((sum, amount) => sum + amount, 0);
+  player.pendingDamage.length = 0;
   player.state = "anchor";
-  player.pendingDamage.length = 0; // 유예시간이 안 지난 대기 데미지 전부 취소
-  player.driftTrail.length = 0;    // 잔상 이펙트도 즉시 제거
+  player.driftTrail.length = 0;
   player.driftCooldownTimer = CONFIG.DRIFT_COOLDOWN;
+
+  if (totalDamage > 0) {
+    performDriftCounterAttack(totalDamage);
+  } else {
+    applyDamageToHp(CONFIG.DRIFT_EMPTY_SELF_DAMAGE); // 아무 피해도 못 쌓았으면 대신 자해
+  }
 }
 
 function updateDrift(dt) {
@@ -701,16 +738,14 @@ function updateDrift(dt) {
   if (player.state === "drift") {
     player.driftTrail.push({ x: player.x, y: player.y });
     if (player.driftTrail.length > 6) player.driftTrail.shift();
+
+    player.driftTimer -= dt;
+    if (player.driftTimer <= 0) finishDrift();
   }
 
-  // 대기 중인 데미지의 유예시간 처리 - 현재 anchor/drift 상태와 무관하게 항상 진행됨
-  for (let i = player.pendingDamage.length - 1; i >= 0; i--) {
-    const entry = player.pendingDamage[i];
-    entry.timer -= dt;
-    if (entry.timer <= 0) {
-      player.pendingDamage.splice(i, 1);
-      applyDamageToHp(entry.amount);
-    }
+  if (player.driftBurst) {
+    player.driftBurst.timer -= dt;
+    if (player.driftBurst.timer <= 0) player.driftBurst = null;
   }
 }
 
@@ -718,7 +753,7 @@ function damagePlayer(amount) {
   if (player.invincibleTimer > 0 || gameState !== "playing") return;
   player.invincibleTimer = CONFIG.HIT_INVINCIBILITY_DURATION; // 피격 자체(무적시간 부여)는 기존과 동일하게 즉시 적용
   if (player.state === "drift") {
-    player.pendingDamage.push({ amount, timer: CONFIG.DRIFT_DAMAGE_GRACE_PERIOD });
+    player.pendingDamage.push(amount); // HP에는 반영하지 않고 축적만 - 표류 종료 시 반격 데미지로 전환됨
   } else {
     applyDamageToHp(amount);
   }
@@ -1009,33 +1044,39 @@ function draw() {
     ctx.fillRect(eyeX, player.y + 8, 6, 6);
     ctx.globalAlpha = 1;
 
-    // 대기 중인 데미지 경고 표시 - "지금 취소 가능한 데미지가 걸려있다"를 눈으로 바로 알 수 있게
+    // 축적된 반격 데미지 표시 - 표류 종료 시 이만큼의 데미지가 광역 반격으로 나간다는 걸 눈으로 알 수 있게
     if (player.pendingDamage.length > 0) {
+      const totalPending = player.pendingDamage.reduce((sum, a) => sum + a, 0);
       const pulse = (Math.sin(performance.now() / 80) + 1) / 2;
-      ctx.fillStyle = pulse > 0.5 ? "#ff5252" : "#ffab91";
+      ctx.fillStyle = pulse > 0.5 ? "#ffd54f" : "#ffecb3";
       ctx.beginPath();
-      ctx.arc(player.x + player.w / 2, player.y - 14, 7, 0, Math.PI * 2);
+      ctx.arc(player.x + player.w / 2, player.y - 14, 8, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "#fff";
+      ctx.fillStyle = "#3e2723";
       ctx.font = "bold 11px 'Segoe UI', sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("!", player.x + player.w / 2, player.y - 10);
+      ctx.fillText(String(totalPending), player.x + player.w / 2, player.y - 10);
       ctx.textAlign = "left";
     }
+  }
+
+  // 표류 종료 시 자동 반격 판정을 잠깐 보여주는 시각효과 (월드 좌표계 - 카메라와 함께 스크롤)
+  if (player.driftBurst) {
+    const b = player.driftBurst;
+    const alpha = clamp(b.timer / CONFIG.DRIFT_BURST_VISUAL_DURATION, 0, 1);
+    ctx.fillStyle = `rgba(255,255,255,${0.5 * alpha})`;
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.strokeStyle = `rgba(79,195,247,${0.9 * alpha})`;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(b.x, b.y, b.w, b.h);
   }
 
   ctx.restore();
   // ===== 여기부터 다시 화면(screen) 좌표계 =====
 
-  // 대기 중인 데미지 경고: 화면 전체에 옅은 붉은 비네트가 깜빡임 - "지금 취소 가능한 데미지가 걸려있다"를
-  // 캐릭터 위 "!" 표시보다 훨씬 크게, 화면 어디를 보고 있어도 놓치지 않게 알려줌
-  if (gameState === "playing" && player.pendingDamage.length > 0) {
-    const pulse = (Math.sin(performance.now() / 150) + 1) / 2;
-    const alpha = 0.18 + 0.22 * pulse;
-    const grad = ctx.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.75);
-    grad.addColorStop(0, "rgba(255,0,0,0)");
-    grad.addColorStop(1, `rgba(255,0,0,${alpha})`);
-    ctx.fillStyle = grad;
+  // 표류 중 화면 틴트 - 연파랑으로 물들여서 "지금 표류 상태"임을 화면 전체에서 바로 알 수 있게
+  if (gameState === "playing" && player.state === "drift") {
+    ctx.fillStyle = "rgba(79,195,247,0.22)";
     ctx.fillRect(0, 0, W, H);
   }
 
@@ -1045,7 +1086,6 @@ function draw() {
 
 /* --------------------------- HUD --------------------------- */
 const hpBarInner = document.getElementById("hpBarInner");
-const hpPendingOverlay = document.getElementById("hpPendingOverlay");
 const hpText = document.getElementById("hpText");
 const dashCdBar = document.getElementById("dashCdBar");
 const atkCdBar = document.getElementById("atkCdBar");
@@ -1057,18 +1097,6 @@ function updateHud() {
   hpBarInner.style.width = (hpRatio * 100) + "%";
   hpText.textContent = `HP ${Math.max(0, player.hp)} / ${CONFIG.PLAYER_MAX_HP}`;
 
-  // 대기 중인 데미지: 현재 HP 바 중 "곧 깎일" 부분을 옅은 사선 패턴으로 겹쳐 표시
-  const pendingSum = player.pendingDamage.reduce((sum, e) => sum + e.amount, 0);
-  const clampedPending = clamp(pendingSum, 0, player.hp);
-  if (clampedPending > 0) {
-    const afterPendingHp = Math.max(0, player.hp - clampedPending);
-    hpPendingOverlay.style.left = (afterPendingHp / CONFIG.PLAYER_MAX_HP * 100) + "%";
-    hpPendingOverlay.style.width = (clampedPending / CONFIG.PLAYER_MAX_HP * 100) + "%";
-    hpPendingOverlay.style.display = "block";
-  } else {
-    hpPendingOverlay.style.display = "none";
-  }
-
   const dashRatio = 1 - clamp(player.dashCooldownTimer / CONFIG.DASH_COOLDOWN, 0, 1);
   dashCdBar.style.width = (dashRatio * 100) + "%";
   dashCdBar.style.background = dashRatio >= 1 ? "#4fc3f7" : "#555";
@@ -1078,8 +1106,8 @@ function updateHud() {
   atkCdBar.style.width = (atkRatio * 100) + "%";
   atkCdBar.style.background = atkRatio >= 1 ? "#ffb74d" : "#555";
 
-  // 표류 쿨타임: 표류 중엔 꽉 찬 채로 "사용 중" 색, 아니면 쿨타임이 채워지는 방향으로 표시
-  // (꽉 차있으면 다시 표류 가능, 비어있을수록 쿨타임이 많이 남은 것)
+  // 표류 쿨타임 진행 상태만 표시: 표류 중엔 꽉 찬 채로 "사용 중" 색, 아니면 쿨타임이 채워지는 방향으로 표시
+  // (꽉 차있으면 다시 표류 가능, 비어있을수록 쿨타임이 많이 남은 것) - 게이지/홀드 로직은 완전히 제거됨
   if (player.state === "drift") {
     driftCdBar.style.width = "100%";
     driftCdBar.style.background = "#ba68c8";
