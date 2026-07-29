@@ -230,9 +230,10 @@ const CONFIG = {
   CHASER_PERCEPTION_INTERVAL: 0.1,
 
   // --- 유령 NPC (순수 시각효과, 아무 판정에도 관여 안 함) ---
-  // 플레이어를 바짝 따라다니는 것처럼 보이는 잔상 NPC. 플레이어 위치 히스토리에서 이만큼(sec)
-  // 과거의 위치를 그대로 가져다 그리기만 한다. 아주 짧게 잡아서 거의 붙어 다니는 느낌을 줌.
-  GHOST_NPC_DELAY: 0.05,
+  // 플레이어가 마지막으로 이동한 방향의 반대쪽에서 살짝 거리를 두고 따라다니는 잔상 NPC.
+  // (updateGhostNpc 참고 - 목표 위치를 지수 감쇠로 부드럽게 쫓아가서 순간이동처럼 보이지 않음)
+  GHOST_NPC_FOLLOW_OFFSET: 40,     // 평소 유지하려는 플레이어와의 가로 거리 (px, 중심 기준)
+  GHOST_NPC_FOLLOW_SMOOTHING: 10,  // 클수록 목표 위치를 더 빨리 쫓아감 (카메라 추적과 같은 지수 감쇠 계수)
 
   // --- 플레이어 표류(drift) 상태 ---
   // 마우스 우클릭 한 번으로 발동. 홀드/재입력 불필요 - 고정 시간 후 자동 종료 + 자동 반격.
@@ -448,42 +449,32 @@ const player = {
 let gameState = "playing"; // playing | respawning
 let respawnTimer = 0;
 
-// --- 플레이어 위치 히스토리 (유령 NPC 전용 - 체이서는 이걸 안 쓰고 자체 주기 샘플링을 쓴다. updateChaserAI 참고) ---
-// 매 프레임 { t, x, y }를 오래된 순서로 쌓아두고, "지금부터 N초 전엔 어디 있었나"를 조회할 수 있게 한다.
-// gameClock은 실제 게임 진행 시간(타임스톱 중엔 update가 안 돌아서 자동으로 멈춤).
-let gameClock = 0;
-const playerPositionHistory = [];
-const MAX_TRACKED_POSITION_DELAY = CONFIG.GHOST_NPC_DELAY;
+// 플레이어가 마지막으로 A/D를 눌러 실제로 이동한 방향 (제자리에 서 있어도 이전 값 유지) - 마우스 조준
+// 방향인 player.facing과는 완전히 별개. 유령 NPC가 "진행 방향 반대편"에 서려고 할 때 기준으로 씀.
+let playerLastMoveDir = 1;
 
-function recordPlayerPositionHistory(dt) {
-  gameClock += dt;
-  playerPositionHistory.push({ t: gameClock, x: player.x, y: player.y });
-  // 어떤 소비자에게도 더는 조회될 일 없는(가장 긴 지연보다도 훨씬 오래된) 기록은 버려서 배열이 안 커지게 함
-  while (playerPositionHistory.length > 1 && playerPositionHistory[1].t < gameClock - MAX_TRACKED_POSITION_DELAY - 0.5) {
-    playerPositionHistory.shift();
-  }
-}
+// 유령 NPC - 순수 시각효과. 충돌/전투 등 어떤 판정에도 관여하지 않고(관여받지도 않고), 플레이어가
+// 마지막으로 이동한 방향의 반대쪽에 약간 거리를 두고 자리 잡으려 한다(따라오는 동료처럼 보이게).
+// 목표 위치로 순간이동하지 않고 카메라와 같은 방식(지수 감쇠)으로 매끄럽게 쫓아가므로, 방향을 자주
+// 바꿔도(왔다갔다 스팸 등) 뚝뚝 끊기지 않고 자연스럽게 옆을 오간다 - 그 과정에서 잠깐 플레이어와
+// 겹칠 수 있는데, 그때는 draw()에서 유령을 플레이어보다 위에 그려서 가려지지 않게 한다.
+const ghostNpc = { x: player.x, y: player.y, facing: -1 };
+function updateGhostNpc(dt) {
+  const targetCenterX = (player.x + player.w / 2) - playerLastMoveDir * CONFIG.GHOST_NPC_FOLLOW_OFFSET;
+  const targetX = targetCenterX - player.w / 2;
+  const targetY = player.y;
 
-// "지금부터 delay(sec) 전" 시점에 가장 가까운(그 시점 이전 중 가장 최근) 기록을 반환.
-// 히스토리가 아직 그만큼 안 쌓였으면(리스폰 직후 등) 가장 오래된 기록으로 대체.
-function getPerceivedPlayerPos(delay) {
-  if (playerPositionHistory.length === 0) return { x: player.x, y: player.y };
-  const targetT = gameClock - delay;
-  let result = playerPositionHistory[0];
-  for (const entry of playerPositionHistory) {
-    if (entry.t > targetT) break;
-    result = entry;
-  }
-  return result;
-}
+  // 카메라 추적과 동일한 프레임레이트 무관 지수 감쇠 - 목표가 갑자기 반대편으로 튀어도
+  // "즉시 순간이동"이 아니라 "빠르지만 매끄럽게 쫓아감"이 되도록.
+  const smoothing = 1 - Math.exp(-CONFIG.GHOST_NPC_FOLLOW_SMOOTHING * dt);
+  const prevX = ghostNpc.x;
+  ghostNpc.x += (targetX - ghostNpc.x) * smoothing;
+  ghostNpc.y += (targetY - ghostNpc.y) * smoothing;
 
-// 유령 NPC - 순수 시각효과. 충돌/전투 등 어떤 판정에도 관여하지 않고(관여받지도 않고),
-// 플레이어 위치 히스토리를 GHOST_NPC_DELAY만큼 지연해서 그대로 따라다니기만 한다.
-const ghostNpc = { x: player.x, y: player.y };
-function updateGhostNpc() {
-  const pos = getPerceivedPlayerPos(CONFIG.GHOST_NPC_DELAY);
-  ghostNpc.x = pos.x;
-  ghostNpc.y = pos.y;
+  // 눈(방향 표시)은 실제로 지금 이동하고 있는 방향을 그대로 반영 - 목표점 근처에서 미세하게
+  // 흔들리는 걸로 눈이 깜빡이지 않도록 아주 작은 움직임은 무시함.
+  if (ghostNpc.x - prevX > 0.05) ghostNpc.facing = 1;
+  else if (ghostNpc.x - prevX < -0.05) ghostNpc.facing = -1;
 }
 
 // 타임스톱(히트스톱) - 0보다 크면 메인 루프가 update()를 아예 건너뛰어 게임 전체가 얼어붙는다.
@@ -662,7 +653,10 @@ function respawnPlayer() {
   player.driftTrail.length = 0;
   player.driftBurst = null;
   projectiles.length = 0;
-  playerPositionHistory.length = 0; // 죽기 전의 위치가 체이서 반응 지연 히스토리에 남아있지 않도록 초기화
+  // 유령 NPC는 목표 위치를 부드럽게 쫓아가는 방식이라, 리셋 안 하면 죽기 전 위치에서부터 스폰 지점까지
+  // 맵을 가로질러 슬라이딩해오는 것처럼 보인다 - 플레이어처럼 즉시 스폰 위치로 순간이동시킴.
+  ghostNpc.x = SPAWN_POINT.x;
+  ghostNpc.y = SPAWN_POINT.y;
   resetEnemies();
   snapCameraToPlayer(); // 리스폰 지점까지 카메라가 스르륵 끌려오지 않고 즉시 이동
   gameState = "playing";
@@ -689,6 +683,7 @@ function updatePlayer(dt) {
   if (heldKeys["KeyA"]) move -= 1;
   if (heldKeys["KeyD"]) move += 1;
   player.vx = move * CONFIG.MOVE_SPEED;
+  if (move !== 0) playerLastMoveDir = move; // 유령 NPC가 "진행 방향 반대편"을 계산할 때 씀 - 제자리에 서면 이전 방향 유지
 
   // --- 중력 ---
   player.vy += CONFIG.GRAVITY * dt;
@@ -1177,8 +1172,7 @@ function update(dt) {
     if (respawnTimer <= 0) respawnPlayer();
   } else {
     updatePlayer(dt);
-    recordPlayerPositionHistory(dt); // 체이서 AI + 유령 NPC가 참고할 "약간 과거의" 플레이어 위치 기록
-    updateGhostNpc();
+    updateGhostNpc(dt);
     updateEnemies(dt);
     updateProjectiles(dt);
   }
@@ -1194,6 +1188,23 @@ function update(dt) {
 function drawRect(r, color) {
   ctx.fillStyle = color;
   ctx.fillRect(r.x, r.y, r.w, r.h);
+}
+
+// 유령 NPC 렌더링 - 함수로 분리한 이유는 draw()에서 플레이어와 겹칠 때만 호출 순서를
+// 바꿔서(플레이어보다 나중에 그려서 위에 보이게) 써야 하기 때문.
+function drawGhostNpc() {
+  const ghostW = player.w * 0.5, ghostH = player.h * 0.5;
+  const ghostDrawX = ghostNpc.x + (player.w - ghostW) / 2; // 가로 중심 정렬
+  const ghostDrawY = ghostNpc.y + (player.h - ghostH);     // 바닥(발) 위치 정렬
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = "#b39ddb";
+  ctx.fillRect(ghostDrawX, ghostDrawY, ghostW, ghostH);
+  // 눈 - 지금 실제로 이동 중인 방향을 가리킴 (플레이어 눈과 같은 스타일, 크기만 절반)
+  ctx.fillStyle = "#4a148c";
+  const eyeSize = 3;
+  const eyeX = ghostNpc.facing === 1 ? ghostDrawX + ghostW - eyeSize - 1 : ghostDrawX + 1;
+  ctx.fillRect(eyeX, ghostDrawY + 4, eyeSize, eyeSize);
+  ctx.globalAlpha = 1;
 }
 
 function draw() {
@@ -1300,20 +1311,12 @@ function draw() {
     ctx.fillRect(hb.x, hb.y, hb.w, hb.h);
   }
 
-  // 유령 NPC - 순수 시각효과, 아무 판정에도 안 걸림. 플레이어를 GHOST_NPC_DELAY만큼 지연해서 바짝
-  // 따라다니기만 함. 플레이어의 절반 크기로 그리되, 발 위치(바닥)와 가로 중심은 맞춰서 "작은 동료가
-  // 같은 자리에 서 있는" 것처럼 보이게 한다. 옅은 보랏빛 반투명이라 의식해서 보면 확실히 보이지만
-  // 몬스터/투사체 색과 안 겹치고 채도도 낮아서 전투 중 시선을 크게 뺏지는 않는다.
-  // 플레이어보다 먼저 그려서 겹칠 땐 항상 플레이어가 위에 보임.
-  if (gameState === "playing") {
-    const ghostW = player.w * 0.5, ghostH = player.h * 0.5;
-    const ghostDrawX = ghostNpc.x + (player.w - ghostW) / 2;
-    const ghostDrawY = ghostNpc.y + (player.h - ghostH); // 바닥(발) 위치 정렬
-    ctx.globalAlpha = 0.4;
-    ctx.fillStyle = "#b39ddb";
-    ctx.fillRect(ghostDrawX, ghostDrawY, ghostW, ghostH);
-    ctx.globalAlpha = 1;
-  }
+  // 유령 NPC는 평소엔 플레이어와 거리를 두고 있어서 먼저(아래에) 그려도 상관없지만, 방향이 바뀌어
+  // 반대편으로 이동하는 도중에는 잠깐 플레이어와 실제로 겹칠 수 있다 - 그 순간만큼은 플레이어에게
+  // 가려지지 않도록 나중에(위에) 그린다.
+  const ghostBox = { x: ghostNpc.x, y: ghostNpc.y, w: player.w, h: player.h };
+  const ghostOverlapsPlayer = gameState === "playing" && rectsOverlap(ghostBox, player);
+  if (gameState === "playing" && !ghostOverlapsPlayer) drawGhostNpc();
 
   // 플레이어
   if (gameState === "playing") {
@@ -1355,6 +1358,7 @@ function draw() {
       ctx.textAlign = "left";
     }
   }
+  if (ghostOverlapsPlayer) drawGhostNpc(); // 겹치는 프레임엔 플레이어를 그린 다음에 그려서 위에 보이게 함
 
   // 표류 반격 판정을 잠깐 보여주는 시각효과 (월드 좌표계 - 카메라와 함께 스크롤).
   // 터질 때 확 밝았다가 그라데이션으로 점점 옅어짐 - 실시간으로 페이드되므로(tickDriftBurst)
