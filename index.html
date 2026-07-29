@@ -131,9 +131,9 @@
      - A / D          : 좌우 이동
      - W 또는 Space    : 점프 (이단 점프 가능, 혼용해서 눌러도 됨)
      - 마우스 좌클릭    : 근접 공격 - 땅에 있으면 마우스 커서 방향의 좁은 사각 판정, 공중이면 방향
-                         무관 원형 판정(AIR_ATTACK_RADIUS, 데미지는 지상의 절반 - startAttack 참고)
-     - 점프 직후 좌클릭  : "숏홉" - SHORT_HOP_WINDOW 이내에 공중 공격을 넣으면 상승 속도가
-                         SHORT_HOP_FORCE로 깎여 거의 제자리에서 위쪽 적만 때리는 낮은 점프가 됨
+                         무관 원형 판정(AIR_ATTACK_RADIUS, 데미지는 지상의 절반 - startAttack 참고).
+                         공중 공격은 매번 상승 속도를 AIR_ATTACK_HOP_FORCE로 덮어써 작은 "숏홉"을
+                         겸함 - 이단 점프와 이어붙이면 사실상 3단 점프도 가능(jumpsUsed를 안 씀)
      - 마우스 우클릭    : 표류(drift) 발동
      - 마우스 커서      : player.facing(근접 공격 방향)을 매 프레임 결정 - 이동 방향과 무관.
                          단, 표류 반격은 방향 무관(플레이어 중심 광역 판정)이라 이 값의 영향을 안 받음
@@ -176,10 +176,12 @@ const CONFIG = {
   MAX_FALL_SPEED: 1400,      // 최대 낙하 속도 (px/sec)
   JUMP_FORCE: 760,           // 점프 초기 상승 속도 (px/sec)
   MAX_JUMPS: 2,              // 최대 점프 횟수 (2 = 이단 점프)
-  // 낮은 점프("숏홉") - 점프 입력 후 이 시간 안에 공격을 넣으면 상승 속도를 JUMP_FORCE 대신
-  // SHORT_HOP_FORCE로 깎아서 거의 제자리에서 공중 공격만 나가는 것처럼 보이게 한다 (updatePlayer 참고).
-  SHORT_HOP_WINDOW: 0.15,    // 점프 입력 후 이 시간(sec) 안에 공격해야 숏홉 취소가 적용됨
-  SHORT_HOP_FORCE: 220,      // 숏홉 취소 시 적용되는 상승 속도 (px/sec) - JUMP_FORCE(760)보다 훨씬 작아 최고점이 약 11px 정도로 미미함
+  // 낮은 점프("숏홉") - 공중 공격을 넣는 순간 현재 상승/낙하 속도와 무관하게 항상 AIR_ATTACK_HOP_FORCE로
+  // 덮어써서 작은 점프 한 번을 더 만들어준다 (updatePlayer의 공격 입력 블록 참고). 막 뛴 직후라면 원래
+  // 점프의 큰 상승 속도를 깎는 "캔슬"로 느껴지고, 이미 낙하 중이었다면 공중에서 다시 살짝 튀어오르는
+  // "추가 점프"로 느껴짐 - 조건 분기 없이 같은 대입 한 줄로 두 상황 모두 자연스럽게 처리됨.
+  // 이단 점프(MAX_JUMPS=2)와 조합하면 점프 → 이단 점프 → 공중 공격을 이어붙여 사실상 3단 점프도 가능.
+  AIR_ATTACK_HOP_FORCE: 420, // 공중 공격 시 적용되는 상승 속도 (px/sec) - JUMP_FORCE(760)의 최고 높이(~137px) 대비 약 42px로 "낮은" 점프
 
   // --- 근접 공격 ---
   // 땅/공중 판정은 모양(사각형 vs 원)과 데미지가 다르지만 활성/후딜레이 타이밍은 공유한다 (startAttack 참고).
@@ -210,6 +212,13 @@ const CONFIG = {
   PROJECTILE_SPEED: 260,     // 투사체 속도 (px/sec) - 낮을수록 피하기 쉬움
   PROJECTILE_RADIUS: 8,
   PROJECTILE_DAMAGE: 1,
+
+  // --- 적 (저격수: 일반 포탑과 체력/발사 타이밍/투사체 속도·데미지는 전부 동일하게 공유하고
+  //     projectile.unblockable만 다름 - 표류 유예/축적도 안 타고 반격으로 격추도 안 되는, 반드시
+  //     직접 피해야 하는 투사체. makeSniper/updateTurretAI(sniper 분기)/updateProjectiles/
+  //     performDriftCounterAttack 참고. 반경만 훨씬 크게 잡고 draw()에서 색도 다르게 그려서
+  //     "이건 다른 놈이다"가 멀리서도 보이게 함.
+  SNIPER_PROJECTILE_RADIUS: 15, // 일반 투사체(PROJECTILE_RADIUS=8)보다 훨씬 큼 - 눈에 확 띄어야 함
 
   // --- 카메라 ---
   CAMERA_SMOOTHING: 6,       // 클수록 카메라가 플레이어를 더 빨리 따라잡음 (지수 감쇠 계수, 프레임레이트 무관)
@@ -445,7 +454,6 @@ const player = {
   facing: 1,        // -1(왼쪽)|1(오른쪽) - 이동 방향이 아니라 마우스 커서 방향으로 매 프레임 갱신됨 (updatePlayer 참고). 공격/반격 판정 방향이 이 값을 그대로 씀
   onGround: false,
   jumpsUsed: 0,
-  timeSinceJump: Infinity, // 마지막 점프 입력 이후 지난 시간(sec) - 숏홉(SHORT_HOP_WINDOW) 판정에 씀
 
   hp: CONFIG.PLAYER_MAX_HP,
   invincibleTimer: 0,
@@ -529,6 +537,27 @@ function makeTurret(x, y, stunnable = true) {
   };
 }
 
+// 저격수 - 체력/발사 주기/예고 시간은 포탑과 완전히 동일(CONFIG 값 공유), updateTurretAI가
+// enemy.type==="sniper"만 보고 투사체를 unblockable로 바꿔서 쏨(반경도 SNIPER_PROJECTILE_RADIUS로
+// 더 크게). AI 로직 자체는 포탑과 같아서 updateEnemies의 "chaser가 아니면 updateTurretAI" 분기에
+// 그대로 올라탄다 - 별도 update 함수가 필요 없음.
+function makeSniper(x, y, stunnable = true) {
+  return {
+    id: enemyIdCounter++,
+    type: "sniper",
+    spawnX: x, spawnY: y,
+    x, y, w: 36, h: 40,
+    hp: CONFIG.TURRET_MAX_HP,
+    maxHp: CONFIG.TURRET_MAX_HP,
+    fireTimer: CONFIG.TURRET_FIRE_INTERVAL * Math.random(),
+    telegraphing: false,
+    alive: true,
+    flashTimer: 0,
+    hasBeenVisible: false,
+    stunnable,
+  };
+}
+
 // 평소엔 spawnX 기준 좌우로 patrolHalfRange만큼 왔다갔다하다가, 플레이어가 가까워지면
 // (그리고 화면에 한 번은 보인 뒤라면) 쫓아와서 근접 공격하는 몬스터.
 function makeChaser(x, y, patrolHalfRange, stunnable = true) {
@@ -565,7 +594,9 @@ const enemies = [
   makeTurret(1090, 420 - 40),  // 원웨이 플랫폼
   makeTurret(1340, 320 - 40),  // 고정 플랫폼
   makeTurret(1600, 500 - 40, false), // 바닥 (트인 구간) - 벽 왼쪽 스턴 면역 수문장
+  makeSniper(1780, 260 - 40),  // 고정 플랫폼 - 벽 안쪽 마지막 관문, 반드시 피해야 하는 투사체
   makeTurret(2040, 390 - 40, false), // 원웨이 플랫폼 - 벽 오른쪽 스턴 면역 수문장
+  makeSniper(2260, 300 - 40),  // 원웨이 플랫폼 - 벽 통과 직후
   makeTurret(2560, 420 - 40), // 고정 플랫폼
   makeTurret(3190, 420 - 40), // 원웨이 플랫폼
   makeTurret(3630, 260 - 40), // 고정 플랫폼 (레벨 끝자락)
@@ -719,21 +750,19 @@ function updatePlayer(dt) {
   if (player.vy > CONFIG.MAX_FALL_SPEED) player.vy = CONFIG.MAX_FALL_SPEED;
 
   // --- 점프 입력 (W 또는 Space, 둘 다 동일하게 동작) ---
-  player.timeSinceJump += dt;
   if ((justPressed["KeyW"] || justPressed["Space"]) && player.jumpsUsed < CONFIG.MAX_JUMPS) {
     player.vy = -CONFIG.JUMP_FORCE;
     player.jumpsUsed += 1;
-    player.timeSinceJump = 0;
   }
 
   // --- 공격 입력 / 상태 (좌클릭) ---
   if (justPressed["Mouse0"] && player.attackState === "idle") {
     startAttack();
-    // 숏홉: 점프 직후(SHORT_HOP_WINDOW 이내) 공중 공격을 넣으면 상승 속도를 대폭 깎아서
-    // "타닥" 입력만으로 거의 제자리에서 위쪽 적을 때리는 낮은 점프가 되게 한다. 이미 착지해
-    // 있으면(attackIsAirborne=false) 지상 공격이라 적용 안 됨.
-    if (player.attackIsAirborne && player.timeSinceJump <= CONFIG.SHORT_HOP_WINDOW) {
-      player.vy = -CONFIG.SHORT_HOP_FORCE;
+    // 숏홉: 공중 공격은 매번 상승 속도를 AIR_ATTACK_HOP_FORCE로 덮어써서 작은 점프를 하나 더 만들어준다.
+    // jumpsUsed를 건드리지 않으므로 이단 점프를 다 쓴 뒤에도 나갈 수 있어(공격 자체의 후딜레이로만
+    // 제한됨), 점프 -> 이단 점프 -> 공중 공격을 이어붙이면 사실상 3단 점프가 됨.
+    if (player.attackIsAirborne) {
+      player.vy = -CONFIG.AIR_ATTACK_HOP_FORCE;
     }
   }
   if (player.attackState === "active") {
@@ -947,6 +976,7 @@ function performDriftCounterAttack(amount) {
   let bonusDamage = 0;
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
+    if (p.unblockable) continue; // 반격으로 격추 불가 - 반드시 직접 피해야 하는 투사체 (updateProjectiles 참고)
     if (circleRectOverlap(p.x, p.y, p.r, hitbox)) {
       bonusDamage += p.damage;
       projectiles.splice(i, 1);
@@ -1057,12 +1087,16 @@ function updateTurretAI(enemy, dt) {
     const px = player.x + player.w / 2, py = player.y + player.h / 2;
     const dx = px - ex, dy = py - ey;
     const len = Math.hypot(dx, dy) || 1;
+    const isSniper = enemy.type === "sniper";
     projectiles.push({
       x: ex, y: ey,
       vx: (dx / len) * CONFIG.PROJECTILE_SPEED,
       vy: (dy / len) * CONFIG.PROJECTILE_SPEED,
-      r: CONFIG.PROJECTILE_RADIUS,
+      r: isSniper ? CONFIG.SNIPER_PROJECTILE_RADIUS : CONFIG.PROJECTILE_RADIUS,
       damage: CONFIG.PROJECTILE_DAMAGE, // 투사체별로 들고 있어서, 나중에 다른 데미지의 투사체가 생겨도 그대로 대응 가능
+      // 표류 유예(damagePlayer의 pendingDamage)도 안 타고 반격으로 격추도 안 됨 - updateProjectiles/
+      // performDriftCounterAttack 참고. 반드시 몸으로 피해야 하는 투사체라는 뜻.
+      unblockable: isSniper,
     });
   }
 }
@@ -1201,7 +1235,11 @@ function updateProjectiles(dt) {
     if (gameState === "playing" &&
         circleRectOverlap(p.x, p.y, p.r, player) &&
         player.invincibleTimer <= 0) {
-      damagePlayer(p.damage);
+      // unblockable: 피격 유예(pendingDamage)를 거치지 않고 즉시 HP에 반영 - anchor의 유예도,
+      // drift 중 축적도 못 타므로 표류/반격으로는 절대 무효화할 수 없고 몸으로 피해야만 한다.
+      // (무적 프레임은 다른 피격과 동일하게 적용됨 - applyDamageToHp가 부여)
+      if (p.unblockable) applyDamageToHp(p.damage);
+      else damagePlayer(p.damage);
       projectiles.splice(i, 1);
     }
   }
@@ -1328,16 +1366,20 @@ function draw() {
     if (!enemy.alive) continue;
 
     const isChaser = enemy.type === "chaser";
+    const isSniper = enemy.type === "sniper";
     const isWarning = isChaser ? enemy.aiState === "windup" : enemy.telegraphing;
-    const baseColor = enemy.stunnable
-      ? (isChaser ? "#5c8a3a" : "#b23b3b")
-      : "#8e44ad";
+    const baseColor = !enemy.stunnable
+      ? "#8e44ad"
+      : isChaser ? "#5c8a3a"
+      : isSniper ? "#00838f" // 포탑(빨강)/체이서(초록)/면역(보라)과 겹치지 않는 청록 - "다른 놈"이라는 신호
+      : "#b23b3b";
     let color = enemy.flashTimer > 0 ? "#ffffff" : baseColor;
-    // 공격 예고 중에는 빠르게 밝아졌다 어두워지는 색으로 경고 (체이서는 근접 느낌의 붉은 계열로 구분)
+    // 공격 예고 중에는 빠르게 밝아졌다 어두워지는 색으로 경고 (체이서는 근접 느낌의 붉은 계열,
+    // 저격수는 투사체와 짝을 맞춘 마젠타 계열로 구분 - 반드시 피해야 하는 예고라는 걸 색으로도 강조)
     if (isWarning) {
       const pulse = (Math.sin(performance.now() / 60) + 1) / 2; // 0~1
-      color = isChaser
-        ? (pulse > 0.5 ? "#ff5252" : "#ff8a65")
+      color = isChaser ? (pulse > 0.5 ? "#ff5252" : "#ff8a65")
+        : isSniper ? (pulse > 0.5 ? "#f50057" : "#ff4081")
         : (pulse > 0.5 ? "#ffb300" : "#ff6f3c");
     }
     drawRect(enemy, color);
@@ -1371,12 +1413,29 @@ function draw() {
     }
   }
 
-  // 투사체
-  ctx.fillStyle = "#ffee58";
+  // 투사체 - unblockable(저격수 투사체)은 표류/반격으로 못 없애는 만큼 색/크기/광륜으로 확실히
+  // 다르게 그려서 "이건 반드시 피해야 한다"가 멀리서도 즉시 보이게 한다.
   for (const p of projectiles) {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-    ctx.fill();
+    if (p.unblockable) {
+      ctx.save();
+      ctx.shadowColor = "#ff1744";
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = "#ff1744";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = "#fff59d";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = "#ffee58";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // 공격 판정 시각화

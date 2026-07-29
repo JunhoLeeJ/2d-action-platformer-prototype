@@ -48,7 +48,7 @@
 - FR-3.3a (공중 공격) `player.onGround`가 false일 때: 방향 무관, 플레이어 중심 기준 반지름 120px(`AIR_ATTACK_RADIUS`) 원형 판정(`circleRectOverlap`). 지상 공격보다 넓고 표류 반격(FR-6, 최대 리치 ~152px)보다는 좁음. 데미지는 지상 공격의 절반(`getAirAttackDamage()` = `ATTACK_DAMAGE/2` = 0.5) — 상수로 고정하지 않고 항상 `ATTACK_DAMAGE`에서 파생. 몬스터 HP는 부풀리지 않고 반칸(0.5) 단위 그대로 두며, 대신 체력 표시를 반칸 표현 가능한 마름모 pip로 바꿈(FR-9.1a/FR-10.1a, `drawHpPip`).
 - FR-3.4 활성 시간 0.08초(`ATTACK_ACTIVE_DURATION`) 동안 판정.
 - FR-3.5 활성 종료 후 후딜레이 0.30초(`ATTACK_RECOVERY_DURATION`) 동안 재공격 불가 (지상/공중 공통).
-- FR-3.6 숏홉(낮은 점프): 공격 입력이 `startAttack()`을 트리거하는 바로 그 순간, `attackIsAirborne`이 true이고 `player.timeSinceJump ≤ SHORT_HOP_WINDOW`(0.15s, 마지막 점프 입력 이후 경과 시간)이면 `player.vy`를 `-SHORT_HOP_FORCE`(220)로 덮어써 상승을 취소한다. 일반 점프(`JUMP_FORCE`=760)의 최고 높이(~137.5px) 대비 숏홉 최고 높이는 ~11.5px로 미미함. `timeSinceJump`는 점프 입력 시 0으로 리셋되고 매 프레임 `dt`만큼 증가.
+- FR-3.6 숏홉(낮은 점프): 공격 입력이 `startAttack()`을 트리거하는 순간 `attackIsAirborne`이 true이면(타이밍 조건 없음, 매번) `player.vy`를 무조건 `-AIR_ATTACK_HOP_FORCE`(420)로 덮어쓴다. `jumpsUsed`를 소모/참조하지 않으므로 이단 점프를 다 쓴 뒤(`jumpsUsed=MAX_JUMPS`)에도 발동하며, 공격 자체의 쿨다운(FR-3.4/3.5)에만 제한받는다 — 점프→이단 점프→공중 공격을 이어붙이면 사실상 3단 점프. 일반 점프(`JUMP_FORCE`=760, 최고 높이 ~137.5px) 대비 숏홉 최고 높이는 ~42px.
 
 ### FR-4. 피격 유예 (anchor 상태)
 - FR-4.1 모든 피격(`damagePlayer`)은 즉시 HP를 깎지 않고 `pendingDamage`에 `{amount, timer=DRIFT_DAMAGE_GRACE_PERIOD(0.5s)}`로 push. 단, `invincibleTimer > 0`이면 아예 등록되지 않음(무시).
@@ -97,6 +97,10 @@
 - FR-9.3 발사 시점의 플레이어 중심을 향해 투사체 생성(속도 `PROJECTILE_SPEED`=260px/s, 반경 `PROJECTILE_RADIUS`=8, 피해 `PROJECTILE_DAMAGE`=1을 투사체 자체의 `damage` 필드로 보유).
 - FR-9.4 일부 개체(`stunnable=false`)는 근접 공격을 맞아도 발사 타이머가 초기화되지 않음(스턴 면역).
 - FR-9.5 화면에 한 번도 보인 적 없는 개체는 완전 대기 상태(발사 안 함) — 카메라에 처음 들어오는 순간부터 동작 시작.
+- FR-9.6 저격수(`type="sniper"`) 변종: FR-9.1~FR-9.5을 값 그대로 전부 공유(체력/발사 주기/예고 시간 동일, `updateTurretAI`를 그대로 재사용). 유일한 차이는 발사하는 투사체에 `unblockable: true`가 붙는다는 것과 그 투사체의 반경이 `SNIPER_PROJECTILE_RADIUS`(15, 일반 `PROJECTILE_RADIUS`=8보다 큼)라는 것.
+  - `unblockable` 투사체는 FR-4(피격 유예)/FR-5(표류)를 전혀 타지 않음 — 명중 시 `damagePlayer()`(유예 큐에 push) 대신 `applyDamageToHp()`를 직접 호출해 즉시 HP를 깎음(`invincibleTimer`는 그대로 존중).
+  - FR-6.2(표류 반격의 투사체 격추/2연타 보너스) 루프에서도 명시적으로 제외되어 반격으로 격추 불가 — 표류·반격 어느 쪽으로도 무효화할 수 없고 오직 이동으로 피해야 함.
+  - 시각적으로 몸통은 청록(`#00838f`, 예고 중엔 마젠타 계열 펄스)으로 포탑(빨강)/체이서(초록)/스턴 면역(보라)과 구분되고, 투사체는 빨간 광륜(`ctx.shadowBlur`)이 있는 큰 원으로 일반 투사체(노란 원)와 확실히 구분됨.
 
 ### FR-10. 적 — 체이서 (chaser)
 - FR-10.1 상태 머신: `patrol → chase → windup → recovery → (chase|return)`, `return → patrol`.
@@ -166,11 +170,12 @@ chaser: `patrolMinX,patrolMaxX,facing,aiState,attackTimer,stunTimer,perceptionTi
 | 그룹 | 키 | 현재값 |
 |---|---|---|
 | 이동 | MOVE_SPEED / GRAVITY / MAX_FALL_SPEED / JUMP_FORCE / MAX_JUMPS | 420 / 2100 / 1400 / 760 / 2 |
-| 이동(숏홉) | SHORT_HOP_WINDOW / SHORT_HOP_FORCE | 0.15 / 220 |
+| 이동(숏홉) | AIR_ATTACK_HOP_FORCE | 420 |
 | 근접 공격(지상) | ATTACK_RANGE_W/H / ATTACK_ACTIVE_DURATION / ATTACK_RECOVERY_DURATION / ATTACK_DAMAGE | 85/75 / 0.08 / 0.30 / 1 |
 | 근접 공격(공중) | AIR_ATTACK_RADIUS / 데미지(getAirAttackDamage = ATTACK_DAMAGE/2) | 120 / 0.5 |
 | 플레이어 | PLAYER_MAX_HP / HIT_INVINCIBILITY_DURATION / RESPAWN_DELAY / PIT_FALL_BUFFER | 5 / 0.5 / 1.2 / 60 |
 | 포탑 | TURRET_FIRE_INTERVAL / TURRET_TELEGRAPH_DURATION / TURRET_MAX_HP / PROJECTILE_SPEED/RADIUS/DAMAGE | 2.2 / 0.5 / 5 / 260 / 8 / 1 |
+| 저격수 | (FR-9.1~9.5 값 전부 포탑과 공유) / SNIPER_PROJECTILE_RADIUS | - / 15 |
 | 카메라 | CAMERA_SMOOTHING / CAMERA_DEADZONE_W | 6 / 160 |
 | 체이서 | CHASER_MAX_HP / PATROL_SPEED / CHASE_SPEED | 3 / 90 / 260 |
 | 체이서 범위 | DETECTION_RANGE / DETECTION_VERTICAL_RANGE / LEASH_RANGE / ATTACK_RANGE_W/H | 480 / 130 / 650 / 130/130 |
