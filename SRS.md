@@ -42,11 +42,12 @@
 - FR-2.3 카메라 X는 `[0, WORLD_WIDTH - 화면폭]`으로 클램프. 세로 스크롤 없음(`camera.y`는 항상 0).
 
 ### FR-3. 근접 공격
-- FR-3.1 좌클릭(`justPressed["Mouse0"]`) 시, 공격 상태가 `idle`이면 `active`로 전환.
-- FR-3.2 공격 방향은 `player.facing`을 그대로 씀 — 매 프레임 "마우스 커서가 플레이어 중심보다 왼쪽/오른쪽인지"로 갱신되며, 이동 입력과는 완전히 무관.
-- FR-3.3 판정 박스: 가로 85px×세로 75px(`ATTACK_RANGE_W/H`), `facing` 방향으로 플레이어 옆에 배치.
-- FR-3.4 활성 시간 0.08초(`ATTACK_ACTIVE_DURATION`) 동안, 겹친 살아있는 적마다(한 스윙에 1회 한정) `ATTACK_DAMAGE`(1) 피해 + 스턴 적용.
-- FR-3.5 활성 종료 후 후딜레이 0.30초(`ATTACK_RECOVERY_DURATION`) 동안 재공격 불가.
+- FR-3.1 좌클릭(`justPressed["Mouse0"]`) 시, 공격 상태가 `idle`이면 `active`로 전환. 이 시점의 `player.onGround`로 `attackIsAirborne`이 고정되어, 스윙 도중 착지/이륙해도 종류가 안 바뀜(`startAttack`).
+- FR-3.2 (지상 공격) 방향은 `player.facing`을 그대로 씀 — 매 프레임 "마우스 커서가 플레이어 중심보다 왼쪽/오른쪽인지"로 갱신되며, 이동 입력과는 완전히 무관.
+- FR-3.3 (지상 공격) 판정 박스: 가로 85px×세로 75px(`ATTACK_RANGE_W/H`), `facing` 방향으로 플레이어 옆에 배치. 겹친 살아있는 적마다(한 스윙에 1회 한정) `ATTACK_DAMAGE`(2) 피해 + 스턴 적용.
+- FR-3.3a (공중 공격) `player.onGround`가 false일 때: 방향 무관, 플레이어 중심 기준 반지름 120px(`AIR_ATTACK_RADIUS`) 원형 판정(`circleRectOverlap`). 지상 공격보다 넓고 표류 반격(FR-6, 최대 리치 ~152px)보다는 좁음. 데미지는 지상 공격의 절반(`getAirAttackDamage()` = `ATTACK_DAMAGE/2` = 1) — 상수로 고정하지 않고 항상 `ATTACK_DAMAGE`에서 파생.
+- FR-3.4 활성 시간 0.08초(`ATTACK_ACTIVE_DURATION`) 동안 판정.
+- FR-3.5 활성 종료 후 후딜레이 0.30초(`ATTACK_RECOVERY_DURATION`) 동안 재공격 불가 (지상/공중 공통).
 
 ### FR-4. 피격 유예 (anchor 상태)
 - FR-4.1 모든 피격(`damagePlayer`)은 즉시 HP를 깎지 않고 `pendingDamage`에 `{amount, timer=DRIFT_DAMAGE_GRACE_PERIOD(0.5s)}`로 push. 단, `invincibleTimer > 0`이면 아예 등록되지 않음(무시).
@@ -89,7 +90,7 @@
 - FR-8.4 무적 중엔 타임스톱도 함께 멈춰있다가(FR-7.2), 타임스톱이 끝나는 시점부터 실제로 감소 시작 — 즉 "타임스톱 끝난 직후"부터 온전한 길이만큼 무적이 보장됨.
 
 ### FR-9. 적 — 포탑 (turret)
-- FR-9.1 체력 `TURRET_MAX_HP`(5). 근접 공격/표류 반격으로만 처치 가능(투사체 없음, 이동 없음).
+- FR-9.1 체력 `TURRET_MAX_HP`(10, 지상 공격 5회 또는 공중 공격 10회분 — `ATTACK_DAMAGE`가 2로 늘어난 만큼 체감 타수가 유지되도록 함께 2배). 근접 공격/표류 반격으로만 처치 가능(투사체 없음, 이동 없음).
 - FR-9.2 발사 주기 `TURRET_FIRE_INTERVAL`(2.2s), 발사 `TURRET_TELEGRAPH_DURATION`(0.5s) 전부터 예고 표시.
 - FR-9.3 발사 시점의 플레이어 중심을 향해 투사체 생성(속도 `PROJECTILE_SPEED`=260px/s, 반경 `PROJECTILE_RADIUS`=8, 피해 `PROJECTILE_DAMAGE`=1을 투사체 자체의 `damage` 필드로 보유).
 - FR-9.4 일부 개체(`stunnable=false`)는 근접 공격을 맞아도 발사 타이머가 초기화되지 않음(스턴 면역).
@@ -163,11 +164,12 @@ chaser: `patrolMinX,patrolMaxX,facing,aiState,attackTimer,stunTimer,perceptionTi
 | 그룹 | 키 | 현재값 |
 |---|---|---|
 | 이동 | MOVE_SPEED / GRAVITY / MAX_FALL_SPEED / JUMP_FORCE / MAX_JUMPS | 420 / 2100 / 1400 / 760 / 2 |
-| 근접 공격 | ATTACK_RANGE_W/H / ATTACK_ACTIVE_DURATION / ATTACK_RECOVERY_DURATION / ATTACK_DAMAGE | 85/75 / 0.08 / 0.30 / 1 |
+| 근접 공격(지상) | ATTACK_RANGE_W/H / ATTACK_ACTIVE_DURATION / ATTACK_RECOVERY_DURATION / ATTACK_DAMAGE | 85/75 / 0.08 / 0.30 / 2 |
+| 근접 공격(공중) | AIR_ATTACK_RADIUS / 데미지(getAirAttackDamage = ATTACK_DAMAGE/2) | 120 / 1 |
 | 플레이어 | PLAYER_MAX_HP / HIT_INVINCIBILITY_DURATION / RESPAWN_DELAY / PIT_FALL_BUFFER | 5 / 0.5 / 1.2 / 60 |
-| 포탑 | TURRET_FIRE_INTERVAL / TURRET_TELEGRAPH_DURATION / TURRET_MAX_HP / PROJECTILE_SPEED/RADIUS/DAMAGE | 2.2 / 0.5 / 5 / 260 / 8 / 1 |
+| 포탑 | TURRET_FIRE_INTERVAL / TURRET_TELEGRAPH_DURATION / TURRET_MAX_HP / PROJECTILE_SPEED/RADIUS/DAMAGE | 2.2 / 0.5 / 10 / 260 / 8 / 1 |
 | 카메라 | CAMERA_SMOOTHING / CAMERA_DEADZONE_W | 6 / 160 |
-| 체이서 | CHASER_MAX_HP / PATROL_SPEED / CHASE_SPEED | 3 / 90 / 260 |
+| 체이서 | CHASER_MAX_HP / PATROL_SPEED / CHASE_SPEED | 6 / 90 / 260 |
 | 체이서 범위 | DETECTION_RANGE / DETECTION_VERTICAL_RANGE / LEASH_RANGE / ATTACK_RANGE_W/H | 480 / 130 / 650 / 130/130 |
 | 체이서 타이밍 | ATTACK_TELEGRAPH_DURATION / ATTACK_RECOVERY_DURATION / ATTACK_DAMAGE / STUN_DURATION / PERCEPTION_INTERVAL | 0.65 / 0.6 / 2 / 0.5 / 0.1 |
 | 유령 NPC | GHOST_NPC_FOLLOW_OFFSET / GHOST_NPC_FOLLOW_SMOOTHING | 40 / 10 |

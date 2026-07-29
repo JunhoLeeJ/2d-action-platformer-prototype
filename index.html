@@ -130,7 +130,8 @@
    조작 (전부 CONFIG 아래 "입력 처리" 섹션의 WATCHED_KEYS / mousedown 리스너 참고):
      - A / D          : 좌우 이동
      - W 또는 Space    : 점프 (이단 점프 가능, 혼용해서 눌러도 됨)
-     - 마우스 좌클릭    : 근접 공격 (판정 방향 = 마우스 커서 방향)
+     - 마우스 좌클릭    : 근접 공격 - 땅에 있으면 마우스 커서 방향의 좁은 사각 판정, 공중이면 방향
+                         무관 원형 판정(AIR_ATTACK_RADIUS, 데미지는 지상의 절반 - startAttack 참고)
      - 마우스 우클릭    : 표류(drift) 발동
      - 마우스 커서      : player.facing(근접 공격 방향)을 매 프레임 결정 - 이동 방향과 무관.
                          단, 표류 반격은 방향 무관(플레이어 중심 광역 판정)이라 이 값의 영향을 안 받음
@@ -175,11 +176,17 @@ const CONFIG = {
   MAX_JUMPS: 2,              // 최대 점프 횟수 (2 = 이단 점프)
 
   // --- 근접 공격 ---
-  ATTACK_RANGE_W: 85,        // 공격 판정 가로 크기
-  ATTACK_RANGE_H: 75,        // 공격 판정 세로 크기
+  // 땅/공중 판정은 모양(사각형 vs 원)과 데미지가 다르지만 활성/후딜레이 타이밍은 공유한다 (startAttack 참고).
+  ATTACK_RANGE_W: 85,        // 지상 공격 판정 가로 크기
+  ATTACK_RANGE_H: 75,        // 지상 공격 판정 세로 크기
   ATTACK_ACTIVE_DURATION: 0.08,  // 판정이 활성화되는 시간 (sec)
   ATTACK_RECOVERY_DURATION: 0.30, // 후딜레이 (sec, 이 동안 재공격 불가)
-  ATTACK_DAMAGE: 1,          // 공격 1회당 적에게 주는 데미지
+  ATTACK_DAMAGE: 2,          // 지상 공격 1회당 적에게 주는 데미지 (몬스터 HP를 전부 2배로 늘려 절반 데미지인 공중 공격도 정수로 표현 - CHASER_MAX_HP/TURRET_MAX_HP 주석 참고)
+  // 공중 공격(플레이어가 땅에 없을 때 좌클릭) 판정 반경. 플레이어 중심 기준 원형이라 방향 무관.
+  // 지상 공격의 최대 리치(~109px, 대각 코너 기준)보다는 크고 표류 반격의 최대 리치(~152px)보다는 작게 잡음.
+  AIR_ATTACK_RADIUS: 120,
+  // 데미지는 getAirAttackDamage()로 계산 - ATTACK_DAMAGE의 절반을 상수로 다시 박지 않고 항상
+  // 지상 공격의 절반으로 유지되도록 함수화 (getDriftCooldownOnCounter/Whiff와 같은 이유).
 
   // --- 플레이어 ---
   PLAYER_MAX_HP: 5,
@@ -190,7 +197,7 @@ const CONFIG = {
   // --- 적 (포탑) ---
   TURRET_FIRE_INTERVAL: 2.2, // 포탑 발사 주기 (sec, 예고 시작부터 다음 예고 시작까지)
   TURRET_TELEGRAPH_DURATION: 0.5, // 발사 전 "예고" 시간 (sec) - 이 동안 포탑이 경고 표시를 보여줌
-  TURRET_MAX_HP: 5,          // 포탑 체력 (근접 공격 5회에 파괴)
+  TURRET_MAX_HP: 10,         // 포탑 체력 (지상 공격 5회 또는 공중 공격 10회에 파괴 - ATTACK_DAMAGE가 2배로 늘어난 만큼 함께 2배로 늘려 체감 타수는 그대로 유지)
   PROJECTILE_SPEED: 260,     // 투사체 속도 (px/sec) - 낮을수록 피하기 쉬움
   PROJECTILE_RADIUS: 8,
   PROJECTILE_DAMAGE: 1,
@@ -200,7 +207,7 @@ const CONFIG = {
   CAMERA_DEADZONE_W: 160,    // 화면 정중앙 기준 가로 데드존 폭(px) - 이 안에서 움직이는 동안엔 카메라가 안 움직임
 
   // --- 적 (추적형 근접 몬스터: 체이서) ---
-  CHASER_MAX_HP: 3,
+  CHASER_MAX_HP: 6,          // 지상 공격 3회 또는 공중 공격 6회에 처치 (TURRET_MAX_HP와 같은 이유로 2배)
   CHASER_PATROL_SPEED: 90,   // 평상시 좌우 순찰 속도 (px/sec) - 아그로가 풀려 순찰 위치로 복귀할 때도 이 속도로 걸어감
   CHASER_CHASE_SPEED: 260,   // 플레이어를 인식하고 쫓아갈 때 속도 (px/sec)
 
@@ -436,6 +443,7 @@ const player = {
   attackState: "idle",     // idle | active | recovery
   attackTimer: 0,
   hitEnemiesThisSwing: new Set(),
+  attackIsAirborne: false, // 이번 스윙이 공중 공격인지 (startAttack 시점의 onGround로 고정, getAttackHitbox/draw에서 참고)
 
   state: "anchor",         // anchor | drift - 피격 판정에는 영향 없음, "데미지를 축적할지 즉시 적용할지"만 바꾸는 레이어
   driftTimer: 0,           // drift 상태로 진입한 시점부터 DRIFT_DURATION에서 카운트다운, 0이 되면 자동 종료+반격
@@ -622,6 +630,15 @@ function startAttack() {
   player.attackState = "active";
   player.attackTimer = CONFIG.ATTACK_ACTIVE_DURATION;
   player.hitEnemiesThisSwing.clear();
+  // 스윙 시작 시점의 접지 상태로 고정 - 활성 시간이 0.08초뿐이라 도중에 이/착지해도 스윙 종류가
+  // 안 바뀌게 함(모양/데미지가 프레임 중간에 바뀌면 시각효과와 판정이 어긋나 보임).
+  player.attackIsAirborne = !player.onGround;
+}
+
+// 공중 공격 데미지 = 지상 공격(ATTACK_DAMAGE)의 절반. 상수로 다시 박지 않고 항상 지상 공격을 따라가도록
+// 함수화 (getDriftCooldownOnCounter/Whiff와 같은 이유 - CONFIG.ATTACK_DAMAGE가 바뀌어도 관계가 자동 유지됨).
+function getAirAttackDamage() {
+  return CONFIG.ATTACK_DAMAGE / 2;
 }
 
 // 카메라 오프셋을 반영해 마우스 커서의 월드 x좌표를 구함 (player.facing 갱신에 씀)
@@ -629,6 +646,8 @@ function getMouseWorldX() {
   return mouseScreenX + camera.x;
 }
 
+// 지상 공격 판정 (facing 방향으로 플레이어 옆에 배치되는 사각형). 공중 공격은 방향 무관 원형이라
+// 별도 판정(AIR_ATTACK_RADIUS, updatePlayer의 attackIsAirborne 분기 참고)을 쓴다.
 function getAttackHitbox() {
   const w = CONFIG.ATTACK_RANGE_W, h = CONFIG.ATTACK_RANGE_H;
   const x = player.facing === 1 ? player.x + player.w : player.x - w;
@@ -701,12 +720,17 @@ function updatePlayer(dt) {
   }
   if (player.attackState === "active") {
     player.attackTimer -= dt;
-    const hitbox = getAttackHitbox();
+    const hitbox = player.attackIsAirborne ? null : getAttackHitbox();
+    const airCx = player.x + player.w / 2, airCy = player.y + player.h / 2;
+    const damage = player.attackIsAirborne ? getAirAttackDamage() : CONFIG.ATTACK_DAMAGE;
     for (const enemy of enemies) {
       if (!enemy.alive) continue;
       if (player.hitEnemiesThisSwing.has(enemy.id)) continue;
-      if (rectsOverlap(hitbox, enemy)) {
-        enemy.hp -= CONFIG.ATTACK_DAMAGE;
+      const hit = player.attackIsAirborne
+        ? circleRectOverlap(airCx, airCy, CONFIG.AIR_ATTACK_RADIUS, enemy)
+        : rectsOverlap(hitbox, enemy);
+      if (hit) {
+        enemy.hp -= damage;
         enemy.flashTimer = 0.12;
         player.hitEnemiesThisSwing.add(enemy.id);
         // 스턴: 맞으면 공격 준비 상태를 초기화 - 계속 때리면 영원히 공격을 못 하게 됨.
@@ -1306,9 +1330,15 @@ function draw() {
 
   // 공격 판정 시각화
   if (player.attackState === "active") {
-    const hb = getAttackHitbox();
     ctx.fillStyle = "rgba(255,255,255,0.55)";
-    ctx.fillRect(hb.x, hb.y, hb.w, hb.h);
+    if (player.attackIsAirborne) {
+      ctx.beginPath();
+      ctx.arc(player.x + player.w / 2, player.y + player.h / 2, CONFIG.AIR_ATTACK_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      const hb = getAttackHitbox();
+      ctx.fillRect(hb.x, hb.y, hb.w, hb.h);
+    }
   }
 
   // 유령 NPC는 평소엔 플레이어와 거리를 두고 있어서 먼저(아래에) 그려도 상관없지만, 방향이 바뀌어
