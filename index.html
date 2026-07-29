@@ -212,12 +212,17 @@ const CONFIG = {
   // enemy.leashRangeW/H, enemy.attackRangeW/H 인스턴스 필드로 박아 넣고, updateTurretAI/updateChaserAI는
   // CONFIG를 직접 보지 않고 그 인스턴스 필드를 읽는다 - 몬스터 종류별로 범위가 달라도 로직은
   // 똑같은 필드 이름으로 동작하게 하기 위함(체이서 전용이던 걸 전체로 일반화).
-  // 포탑/저격수처럼 "제자리형"이라 세 범위가 굳이 다를 이유가 없는 몬스터는 이 기본값을 그대로 셋 다에 씀.
-  // 원래 캔버스 크기(960x540, 절반값)에 고정해서 실제 카메라 뷰(W/H)가 넓어져도 같이 안 늘어나게 했다 -
-  // 그래야 뷰포트를 넓혔을 때 "화면엔 보이지만 아직 어그로는 안 끌린" 몬스터가 생길 수 있음(나중에
+  //
+  // leash/attack 범위는 숫자를 넣으면 그 거리만큼의 "유한" 범위가 되고, `Infinity`를 넣으면 그 비교
+  // (`dist > range`)가 항상 false가 되어 사실상 "무제한"이 된다 - 새 상수나 특수 문자열 없이 JS의
+  // Infinity 값 자체가 "이 몬스터는 한 번 어그로가 끌리면 절대 안 풀린다"는 뜻을 그대로 표현한다.
+  // 체이서(유한 어그로, CHASER_LEASH_RANGE)와 포탑/저격수(무한 어그로 - makeStationaryRangeFields 참고)가
+  // 서로 다른 값을 넣는 것만으로 완전히 다른 성격의 몬스터가 되는 게 이 설계의 핵심.
+  ENEMY_DEFAULT_DETECTION_RANGE_W: 480, // 원래 화면(960x540) 절반 폭 - 포탑/저격수의 최초 감지 판정에 씀
+  ENEMY_DEFAULT_DETECTION_RANGE_H: 270, // 원래 화면 절반 높이 - 가로/세로 둘 다 만족해야 감지됨
+  // 원래 캔버스 크기에 고정해서 실제 카메라 뷰(W/H)가 넓어져도 같이 안 늘어나게 했다 - 그래야
+  // 뷰포트를 넓혔을 때 "화면엔 보이지만 아직 어그로는 안 끌린" 몬스터가 생길 수 있음(나중에
   // 비-어그로 상태 전용 유휴 애니메이션을 넣을 계획이라 이 여백이 필요함 - updateTurretAI 참고).
-  ENEMY_DEFAULT_RANGE_W: 480, // 원래 화면 절반 폭
-  ENEMY_DEFAULT_RANGE_H: 270, // 원래 화면 절반 높이 - 가로/세로 둘 다 만족해야 범위 안
 
   // --- 적 (포탑) ---
   TURRET_FIRE_INTERVAL: 2.2, // 포탑 발사 주기 (sec, 예고 시작부터 다음 예고 시작까지)
@@ -540,12 +545,14 @@ let enemyIdCounter = 0;
 // (ENEMY_DEFAULT_RANGE_W/H)이라 makeTurret/makeSniper가 공유해서 쓴다.
 function makeStationaryRangeFields() {
   return {
-    detectionRangeW: CONFIG.ENEMY_DEFAULT_RANGE_W,
-    detectionRangeH: CONFIG.ENEMY_DEFAULT_RANGE_H,
-    leashRangeW: CONFIG.ENEMY_DEFAULT_RANGE_W,
-    leashRangeH: CONFIG.ENEMY_DEFAULT_RANGE_H,
-    attackRangeW: CONFIG.ENEMY_DEFAULT_RANGE_W,
-    attackRangeH: CONFIG.ENEMY_DEFAULT_RANGE_H,
+    detectionRangeW: CONFIG.ENEMY_DEFAULT_DETECTION_RANGE_W,
+    detectionRangeH: CONFIG.ENEMY_DEFAULT_DETECTION_RANGE_H,
+    // 포탑/저격수는 체이서와 달리 한 번 어그로가 끌리면 절대 안 풀린다 - 최초 감지만 detectionRange로
+    // 판정하고, 그 이후엔 leash/attack이 Infinity라 거리 비교가 항상 통과함(위 CONFIG 주석 참고).
+    leashRangeW: Infinity,
+    leashRangeH: Infinity,
+    attackRangeW: Infinity,
+    attackRangeH: Infinity,
     aggro: false, // 감지 범위 안에 들어오기 전까진 완전 대기 상태 (예고/발사 안 함) - updateTurretAI 참고
   };
 }

@@ -97,7 +97,9 @@
 - FR-9.3 발사 시점의 플레이어 중심을 향해 투사체 생성(속도 `PROJECTILE_SPEED`=260px/s, 반경 `PROJECTILE_RADIUS`=8, 피해 `PROJECTILE_DAMAGE`=1을 투사체 자체의 `damage` 필드로 보유).
 - FR-9.4 일부 개체(`stunnable=false`)는 근접 공격을 맞아도 발사 타이머가 초기화되지 않음(스턴 면역).
 - FR-9.5 화면에 한 번도 보인 적 없는 개체(`hasBeenVisible=false`)는 완전 대기 상태(AI 자체가 안 돎) — 카메라에 처음 들어오는 순간부터 매 프레임 `updateTurretAI` 호출 시작.
-- FR-9.5a 감지/어그로/공격 범위(모든 몬스터 공통 개념 - FR-10.3/10.4 체이서와 동일 구조를 공유): `hasBeenVisible`이 true여도 `enemy.aggro`가 true가 되기 전까진 예고/발사를 전혀 안 함(완전 대기 - 향후 유휴 애니메이션이 들어갈 자리). 플레이어와의 거리(가로/세로 각각)가 `enemy.detectionRangeW/H` 이내면 `aggro=true`로 전환, 이미 `aggro`인 상태에서 `enemy.leashRangeW/H`를 벗어나면 `aggro=false`로 되돌아가며 `fireTimer`/`telegraphing`도 리셋됨. `aggro`이고 `enemy.attackRangeW/H` 이내일 때만 `fireTimer`가 실제로 줄어들고 발사됨. 포탑/저격수는 세 범위가 전부 `ENEMY_DEFAULT_RANGE_W/H`(480/270, 원래 960×540 화면의 절반값 - FR-1의 렌더링 해상도 참고)로 동일하게 세팅됨. 이 기본값은 실제 캔버스 `W`/`H`(1440×540)와 무관하게 고정되어 있어, 넓어진 카메라 뷰 안에서 아직 감지 범위 밖인 몬스터를 플레이어가 미리 볼 수 있음.
+- FR-9.5a 감지/어그로/공격 범위(모든 몬스터 공통 개념 - FR-10.3/10.4 체이서와 동일 구조를 공유): `hasBeenVisible`이 true여도 `enemy.aggro`가 true가 되기 전까진 예고/발사를 전혀 안 함(완전 대기 - 향후 유휴 애니메이션이 들어갈 자리). 플레이어와의 거리(가로/세로 각각)가 `enemy.detectionRangeW/H` 이내면 `aggro=true`로 전환, 이미 `aggro`인 상태에서 `enemy.leashRangeW/H`를 벗어나면 `aggro=false`로 되돌아가며 `fireTimer`/`telegraphing`도 리셋됨. `aggro`이고 `enemy.attackRangeW/H` 이내일 때만 `fireTimer`가 실제로 줄어들고 발사됨.
+  - 포탑/저격수의 `detectionRangeW/H`는 `ENEMY_DEFAULT_DETECTION_RANGE_W/H`(480/270, 원래 960×540 화면의 절반값 - FR-1의 렌더링 해상도 참고)로 세팅됨. 이 기본값은 실제 캔버스 `W`/`H`(1440×540)와 무관하게 고정되어 있어, 넓어진 카메라 뷰 안에서 아직 감지 범위 밖인 몬스터를 플레이어가 미리 볼 수 있음.
+  - 포탑/저격수의 `leashRangeW/H`/`attackRangeW/H`는 `Infinity` — 체이서(FR-10.4, 유한한 `CHASER_LEASH_RANGE`라서 멀어지면 어그로가 풀림)와 달리, 최초 감지(`detectionRange` 진입) 이후로는 거리와 무관하게 `aggro`가 절대 `false`로 되돌아가지 않고 공격 범위 제한도 없음("무한 어그로"). 유한 범위(숫자)와 무한 어그로(`Infinity`)는 같은 필드에 다른 값만 넣으면 되는 구조라, 새 몬스터도 둘 중 하나를 그대로 골라 쓸 수 있음.
 - FR-9.6 저격수(`type="sniper"`) 변종: FR-9.1~FR-9.5을 값 그대로 전부 공유(체력/발사 주기/예고 시간 동일, `updateTurretAI`를 그대로 재사용). 유일한 차이는 발사하는 투사체에 `unblockable: true`가 붙는다는 것과 그 투사체의 반경이 `SNIPER_PROJECTILE_RADIUS`(15, 일반 `PROJECTILE_RADIUS`=8보다 큼)라는 것.
   - `unblockable` 투사체는 FR-4(피격 유예)/FR-5(표류)를 전혀 타지 않음 — 명중 시 `damagePlayer()`(유예 큐에 push) 대신 `applyDamageToHp()`를 직접 호출해 즉시 HP를 깎음(`invincibleTimer`는 그대로 존중).
   - FR-6.2(표류 반격의 투사체 격추/2연타 보너스) 루프에서도 명시적으로 제외되어 반격으로 격추 불가 — 표류·반격 어느 쪽으로도 무효화할 수 없고 오직 이동으로 피해야 함.
@@ -175,7 +177,7 @@ chaser: `patrolMinX,patrolMaxX,facing,aiState,attackTimer,stunTimer,perceptionTi
 | 근접 공격(지상) | ATTACK_RANGE_W/H / ATTACK_ACTIVE_DURATION / ATTACK_RECOVERY_DURATION / ATTACK_DAMAGE | 85/75 / 0.08 / 0.30 / 1 |
 | 근접 공격(공중) | AIR_ATTACK_RADIUS / 데미지(getAirAttackDamage = ATTACK_DAMAGE/2) | 85 / 0.5 |
 | 플레이어 | PLAYER_MAX_HP / HIT_INVINCIBILITY_DURATION / RESPAWN_DELAY / PIT_FALL_BUFFER | 5 / 0.5 / 1.2 / 60 |
-| 적 공통 범위(포탑/저격수 기본값) | ENEMY_DEFAULT_RANGE_W/H (감지=어그로=공격 범위 전부 동일) | 480/270 |
+| 적 공통 범위(포탑/저격수 기본값) | ENEMY_DEFAULT_DETECTION_RANGE_W/H (감지만 유한, leash/attackRange는 Infinity=무한 어그로) | 480/270 |
 | 포탑 | TURRET_FIRE_INTERVAL / TURRET_TELEGRAPH_DURATION / TURRET_MAX_HP / PROJECTILE_SPEED/RADIUS/DAMAGE | 2.2 / 0.5 / 5 / 260 / 8 / 1 |
 | 저격수 | (FR-9.1~9.5 값 전부 포탑과 공유) / SNIPER_PROJECTILE_RADIUS | - / 15 |
 | 카메라 | CAMERA_SMOOTHING / CAMERA_DEADZONE_W | 6 / 160 |
