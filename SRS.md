@@ -1,0 +1,179 @@
+# SRS — 2D 액션 플랫포머 프로토타입
+
+문서 버전: 1.0 (커밋 `88b20d8` 기준, `index.html`의 실제 구현을 역기술)
+
+## 1. 목적 및 범위
+
+이 문서는 `index.html`에 구현된 게임의 기능적/비기능적 요구사항을 현재 코드 기준으로 명세한다. PRD가 "무엇을, 왜"를 다룬다면 이 문서는 "정확히 어떻게 동작해야 하는가"를 수치와 조건으로 못박는다. 각 요구사항은 현재 코드의 실제 동작이며, 괄호 안 `CONFIG.*`는 해당 수치를 조정하는 튜닝 변수를 가리킨다 (전부 `index.html` 상단 `CONFIG` 객체 하나에 모여 있음).
+
+## 2. 시스템 개요
+
+- **구성**: 단일 HTML 파일. 인라인 `<style>` + `<canvas>` + 인라인 `<script>`. 빌드 도구/번들러/외부 라이브러리 없음.
+- **렌더링**: Canvas 2D API. 960×540 고정 해상도, `image-rendering: pixelated`.
+- **루프**: `requestAnimationFrame` 기반. 프레임마다 `dt`(초 단위 경과시간, 0.033초로 클램프)를 계산해 물리/로직에 사용 (프레임레이트 무관 동작).
+- **좌표계**: 월드 좌표(픽셀) 기준으로 모든 오브젝트 위치를 관리하고, 렌더링 시 카메라 오프셋만큼 캔버스를 `translate`해서 화면에 투영. HUD는 DOM 오버레이라 카메라와 무관.
+- **영속성**: 없음. 새로고침 시 모든 상태 초기화.
+- **네트워크**: 없음 (외부 API/서버 호출 전무).
+
+## 3. 용어 정의
+
+| 용어 | 의미 |
+|---|---|
+| anchor 상태 | 플레이어 기본 상태. 피격 시 유예 후 HP 확정 반영 |
+| drift 상태 | 표류 중. 피격이 HP로 안 가고 반격 재료로 축적됨 |
+| pendingDamage | 아직 HP에 확정 반영되지 않은 대기 중 피해 목록 |
+| 타임스톱(히트스톱) | `update()` 자체를 건너뛰어 게임 전체가 멈추는 짧은 구간 |
+| 인식 범위 | 체이서가 patrol/return 상태에서 플레이어를 발견해 추적을 시작하는 거리 |
+| 어그로 범위 | 체이서가 이미 추적 중일 때, 이 거리를 넘으면 추적을 포기하는 거리 |
+
+## 4. 기능 요구사항
+
+### FR-1. 이동 / 물리
+- FR-1.1 좌우 이동: `heldKeys["KeyA"/"KeyD"]`에 따라 `vx = ±MOVE_SPEED`(420px/s).
+- FR-1.2 중력: `vy += GRAVITY·dt`(2100px/s²), `MAX_FALL_SPEED`(1400px/s)로 클램프.
+- FR-1.3 점프: `KeyW` 또는 `Space` 중 하나라도 눌리는 순간(`justPressed`) `vy = -JUMP_FORCE`(760px/s). `jumpsUsed < MAX_JUMPS`(2)일 때만 허용 — 이단 점프. 바닥 착지 시 `jumpsUsed` 리셋.
+- FR-1.4 지형 충돌: 고정형 플랫폼은 X/Y 양방향 모두 차단. 원웨이 플랫폼은 위에서 낙하해 착지할 때만(`vy≥0`이고 직전 프레임에 발판 위였을 때) 차단, 그 외엔 통과.
+- FR-1.5 낙사: `player.y > 캔버스높이 + PIT_FALL_BUFFER`(60px)가 되면 즉시 사망 처리.
+- FR-1.6 월드 경계: `player.x`는 `[0, WORLD_WIDTH - player.w]`로 클램프 (WORLD_WIDTH=3840).
+
+### FR-2. 카메라
+- FR-2.1 화면 정중앙 기준 가로 데드존(`CAMERA_DEADZONE_W`=160px) 안에서는 플레이어가 움직여도 카메라 고정.
+- FR-2.2 데드존을 벗어나면 지수 감쇠(`1-e^(-CAMERA_SMOOTHING·dt)`, 계수 6)로 목표 위치를 부드럽게 추적. 프레임레이트 무관.
+- FR-2.3 카메라 X는 `[0, WORLD_WIDTH - 화면폭]`으로 클램프. 세로 스크롤 없음(`camera.y`는 항상 0).
+
+### FR-3. 근접 공격
+- FR-3.1 좌클릭(`justPressed["Mouse0"]`) 시, 공격 상태가 `idle`이면 `active`로 전환.
+- FR-3.2 공격 방향은 `player.facing`을 그대로 씀 — 매 프레임 "마우스 커서가 플레이어 중심보다 왼쪽/오른쪽인지"로 갱신되며, 이동 입력과는 완전히 무관.
+- FR-3.3 판정 박스: 가로 85px×세로 75px(`ATTACK_RANGE_W/H`), `facing` 방향으로 플레이어 옆에 배치.
+- FR-3.4 활성 시간 0.08초(`ATTACK_ACTIVE_DURATION`) 동안, 겹친 살아있는 적마다(한 스윙에 1회 한정) `ATTACK_DAMAGE`(1) 피해 + 스턴 적용.
+- FR-3.5 활성 종료 후 후딜레이 0.30초(`ATTACK_RECOVERY_DURATION`) 동안 재공격 불가.
+
+### FR-4. 피격 유예 (anchor 상태)
+- FR-4.1 모든 피격(`damagePlayer`)은 즉시 HP를 깎지 않고 `pendingDamage`에 `{amount, timer=DRIFT_DAMAGE_GRACE_PERIOD(0.5s)}`로 push. 단, `invincibleTimer > 0`이면 아예 등록되지 않음(무시).
+- FR-4.2 `anchor` 상태에서만 각 항목의 `timer`가 매 프레임 감소. `drift` 상태에서는 감소하지 않음(그대로 축적).
+- FR-4.3 `timer ≤ 0`이 되면 그 항목만 HP에 확정 반영(`applyDamageToHp`) 후 제거.
+- FR-4.4 `invincibleTimer > 0`이 되는 순간(해당 프레임의 유예 처리 루프 종료 직후), 남아있는 `pendingDamage` 전부를 무효화(길이 0으로 초기화) — 무적 중에 다른 대기 항목이 뒤늦게 확정되어 "무적인데 또 맞는" 상황을 방지.
+- FR-4.5 시각 피드백: `anchor` 상태이고 `pendingDamage`가 비어있지 않으면 화면 전체에 옅은 붉은 펄스 오버레이.
+
+### FR-5. 표류(drift)
+- FR-5.1 발동 조건: 우클릭(`justPressed["Mouse2"]`) + `state==="anchor"` + `driftCooldownTimer≤0`.
+- FR-5.2 발동 시 `state="drift"`, `driftTimer=DRIFT_DURATION`(0.4s) 설정. 무적은 부여하지 않음(그래야 표류 중 피격이 `damagePlayer` 가드를 통과해 계속 축적 가능).
+- FR-5.3 이동속도: 표류 중에도 평상시와 동일한 `MOVE_SPEED` (표류 전용 가속 없음).
+- FR-5.4 `driftTimer≤0`이 되면 `finishDrift()` 실행:
+  - `pendingDamage` 합계(`totalDamage`) > 0 → `performDriftCounterAttack(totalDamage)` 호출, 쿨다운=`getDriftCooldownOnCounter()`
+  - 합계 = 0 → `DRIFT_EMPTY_SELF_DAMAGE`(1)만큼 자해(`applyDamageToHp`), 쿨다운=`getDriftCooldownOnWhiff()`
+  - 결과와 무관하게 이 시점에 `invincibleTimer = max(현재값, HIT_INVINCIBILITY_DURATION)` 부여
+- FR-5.5 표류 재발동 쿨다운은 상수가 아니라 계산값:
+  - `getDriftCooldownOnCounter() = HIT_INVINCIBILITY_DURATION + DRIFT_DAMAGE_GRACE_PERIOD + DRIFT_COOLDOWN_COUNTER_MARGIN(0.4)` → 현재 1.4초
+  - `getDriftCooldownOnWhiff() = getDriftCooldownOnCounter() + DRIFT_COOLDOWN_WHIFF_EXTRA(0.8)` → 현재 2.2초
+- FR-5.6 시각 피드백: `drift` 상태 동안 화면 전체 파란 틴트. `pendingDamage`가 쌓여 있으면(=지금 끝나도 자해 대신 반격이 나감) 더 진한 파랑으로 구분.
+
+### FR-6. 표류 반격
+- FR-6.1 판정 범위: 플레이어 중심 기준 가로 230px×세로 200px(`DRIFT_ATTACK_RANGE_W/H`), 방향(facing) 무관 — 광역 판정.
+- FR-6.2 1타: 범위 안 살아있는 적에게 `totalDamage × DRIFT_COUNTER_DAMAGE_MULTIPLIER(2)` 피해 + 스턴 적용.
+- FR-6.3 투사체 격추: 1타와 같은 판정 범위 안의 투사체를 전부 제거하고, 제거된 투사체들의 `damage` 필드 합계(`bonusDamage`)를 구함.
+- FR-6.4 2타(조건부): `bonusDamage > 0`이면, `HITSTOP_DOUBLE_HIT_GAP`(0.66s) 경과 후 같은 범위에 `bonusDamage × DRIFT_COUNTER_DAMAGE_MULTIPLIER` 피해를 한 번 더 적용. 2타 자체는 투사체를 다시 검사하지 않음(3타로 연쇄되지 않음).
+- FR-6.5 반격 이펙트(`driftBurst`)는 1타=하늘색, 2타=금색으로 구분 표시되며, `DRIFT_BURST_VISUAL_DURATION`(0.12s) 동안 실시간(타임스톱과 무관하게)으로 페이드아웃.
+
+### FR-7. 타임스톱(히트스톱)
+- FR-7.1 트리거: (a) `applyDamageToHp` 호출 시 — 원인 "damage", 길이 `HITSTOP_DURATION`(0.3s). (b) `performDriftCounterAttack`의 각 타격 시 — 원인 "counter", 1타/2타 모두 최종적으로 `HITSTOP_DURATION`으로 마무리(1타→2타 사이는 `HITSTOP_DOUBLE_HIT_GAP`).
+- FR-7.2 `timeStopTimer>0`인 동안 메인 루프는 `update()`를 완전히 건너뜀 — 플레이어/적/투사체/무적시간/쿨다운 등 모든 게임 로직이 정지. `draw()`는 계속 호출되어 정지 프레임처럼 보임.
+- FR-7.3 다단 정지 연결: `triggerTimeStop(duration, reason, onComplete)`의 `onComplete`가 타임스톱 종료 시점에 실행되며, 그 안에서 다시 `triggerTimeStop`을 호출하면 화면이 풀리지 않고 다음 정지 구간으로 바로 이어짐(반격 2연타 연출에 사용).
+- FR-7.4 입력 처리: 타임스톱 도중 눌린 키/마우스 버튼은 `justPressed`로 바로 들어가지 않고 `pendingKeyAfterFreeze`에 대기. 타임스톱이 끝나는 순간 그 입력이 "아직 눌려있으면" 그제서야 `justPressed`로 전환(그 프레임에 즉시 반영), 이미 뗐다면 폐기 — 즉 타임스톱 중 입력은 예약되지 않음.
+- FR-7.5 화면 틴트: 원인별로 다른 색(damage=빨강 `rgba(255,23,23,·)`, counter=파랑 `rgba(41,121,255,·)`)을 잔여 비율(`timeStopTimer/timeStopDuration`)로 페이드.
+
+### FR-8. 무적
+- FR-8.1 무적은 오직 `applyDamageToHp()` 호출 시점(HP가 실제로 깎이는 순간, 자해 포함)에만 부여 — `HIT_INVINCIBILITY_DURATION`(0.5s), 항상 `Math.max` 방식(기존 더 긴 무적을 줄이지 않음).
+- FR-8.2 `finishDrift()`도 결과(반격/자해)와 무관하게 별도로 같은 값을 부여 — "이벤트 직후 무적시간"이 항상 동일 길이로 보장됨.
+- FR-8.3 무적 중엔 `damagePlayer()`의 최초 진입 가드(`invincibleTimer>0`)에 의해 새로운 피격이 아예 등록되지 않음.
+- FR-8.4 무적 중엔 타임스톱도 함께 멈춰있다가(FR-7.2), 타임스톱이 끝나는 시점부터 실제로 감소 시작 — 즉 "타임스톱 끝난 직후"부터 온전한 길이만큼 무적이 보장됨.
+
+### FR-9. 적 — 포탑 (turret)
+- FR-9.1 체력 `TURRET_MAX_HP`(5). 근접 공격/표류 반격으로만 처치 가능(투사체 없음, 이동 없음).
+- FR-9.2 발사 주기 `TURRET_FIRE_INTERVAL`(2.2s), 발사 `TURRET_TELEGRAPH_DURATION`(0.5s) 전부터 예고 표시.
+- FR-9.3 발사 시점의 플레이어 중심을 향해 투사체 생성(속도 `PROJECTILE_SPEED`=260px/s, 반경 `PROJECTILE_RADIUS`=8, 피해 `PROJECTILE_DAMAGE`=1을 투사체 자체의 `damage` 필드로 보유).
+- FR-9.4 일부 개체(`stunnable=false`)는 근접 공격을 맞아도 발사 타이머가 초기화되지 않음(스턴 면역).
+- FR-9.5 화면에 한 번도 보인 적 없는 개체는 완전 대기 상태(발사 안 함) — 카메라에 처음 들어오는 순간부터 동작 시작.
+
+### FR-10. 적 — 체이서 (chaser)
+- FR-10.1 상태 머신: `patrol → chase → windup → recovery → (chase|return)`, `return → patrol`.
+- FR-10.2 인식(perception) 폴링: 매 프레임이 아니라 `CHASER_PERCEPTION_INTERVAL`(0.1s)마다 한 번씩만 실제 플레이어 위치를 다시 샘플링(`perceivedPlayerX/Y`). 그 사이엔 마지막 샘플을 그대로 사용 — 모든 인식/추적 판단은 이 값 기준.
+- FR-10.3 인식 범위: 가로 `CHASER_DETECTION_RANGE`(480px) × 세로 `CHASER_DETECTION_VERTICAL_RANGE`(130px) 안에 들어오면 `patrol`/`return`에서 `chase`로 전환.
+- FR-10.4 어그로(추적 유지) 범위: `chase` 중 `CHASER_LEASH_RANGE`(650px)보다 멀어지면 추적 포기 → `return`.
+- FR-10.5 낙사 구간 회피: `chase` 중 자신과 인식 위치 사이에 `GROUND_GAPS`에 정의된 구멍이 하나라도 걸쳐 있으면 즉시 추적 포기 → `return` (체이서는 점프/낙하 판정이 없어 구멍을 못 건넘).
+- FR-10.6 공격 트리거: 거리 기반이 아니라, 실제 공격 히트박스(`getChaserAttackHitbox`, 가로/세로 `CHASER_ATTACK_RANGE_W/H`=130/130)가 **현재 실제 플레이어 위치**와 조금이라도 겹칠 때만 `windup` 진입. 스턴 중에는 진입 불가.
+- FR-10.7 `windup`: 진입 시점 `facing`으로 고정, `CHASER_ATTACK_TELEGRAPH_DURATION`(0.65s) 후 그 시점의 실제 플레이어 위치로 재판정하여 명중 시 `CHASER_ATTACK_DAMAGE`(2) 적용 → `recovery`(`CHASER_ATTACK_RECOVERY_DURATION`=0.6s).
+- FR-10.8 `return`: 순간이동 없이 `CHASER_PATROL_SPEED`(90px/s)로 순찰 범위(`patrolMinX~patrolMaxX`)까지 걸어서 복귀. 복귀 도중 인식 범위(FR-10.3) 안에 플레이어가 다시 들어오면 즉시 `chase`로 전환. 순찰 범위에 도달하면 `patrol`로 전환.
+- FR-10.9 근접 공격/표류 반격에 맞으면 스턴(`CHASER_STUN_DURATION`=0.5s, 스턴 면역 개체 제외) — `windup` 중이면 캔슬되어 `chase`로 되돌아감.
+
+### FR-11. 레벨 지형
+- FR-11.1 월드 폭 3840px(화면의 4배). 바닥 y=500, 낙사 구멍 2곳(x=900±100, x=2350±120).
+- FR-11.2 고정형 플랫폼 5개(바닥 제외) + 원웨이 플랫폼 9개로 수직 구간 구성.
+- FR-11.3 봉쇄 벽(x=1900): 벽보다 스폰 쪽(`spawnX<1900`)에 살아있는 적이 하나라도 있으면 잠김 — 플레이어/체이서 모두 통과 불가(양방향 차단, 어떤 점프로도 우회 불가). 벽 너머 적은 벽이 잠긴 동안 "화면 밖"과 동일하게 플레이어를 인식하지 못함.
+
+### FR-12. HP / 사망 / 리스폰
+- FR-12.1 `PLAYER_MAX_HP`=5. HP가 0 이하가 되면 `gameState="respawning"` 전환, `RESPAWN_DELAY`(1.2s) 후 스폰 지점으로 복귀.
+- FR-12.2 리스폰 시: HP/위치/무적(0.5×`HIT_INVINCIBILITY_DURATION`)/표류 관련 상태 전부 초기화, 모든 적이 스폰 상태로 리셋(위치/체력/AI 상태), 투사체 전부 제거, 카메라 즉시 스냅, 유령 NPC 위치도 스폰 지점으로 즉시 이동(슬라이딩 방지).
+- FR-12.3 `respawning` 상태에서도 투사체 업데이트는 계속되어 화면에서 자연스럽게 정리됨.
+
+### FR-13. 동료 유령 NPC (비상호작용)
+- FR-13.1 어떤 충돌/전투 판정 함수에서도 참조되지 않음 — 피해를 주지도 받지도, 플레이어/적 판정에 영향을 주지도 않음.
+- FR-13.2 목표 위치: 플레이어가 마지막으로 A/D를 눌러 이동한 방향(`playerLastMoveDir`, 정지 시에도 이전 값 유지)의 **반대쪽**으로 `GHOST_NPC_FOLLOW_OFFSET`(40px, 중심 기준) 떨어진 지점, 세로는 플레이어와 동일.
+- FR-13.3 목표 위치로 순간이동하지 않고, 카메라와 동일한 지수 감쇠(`GHOST_NPC_FOLLOW_SMOOTHING`=10)로 매 프레임 부드럽게 추적.
+- FR-13.4 크기는 플레이어의 절반, 발 위치(바닥)와 가로 중심을 플레이어 박스에 맞춰 정렬.
+- FR-13.5 렌더링 순서: 플레이어와 겹치지 않는 프레임엔 플레이어보다 먼저(아래에) 그리고, 겹치는 프레임(방향 전환 중 스쳐 지나갈 때)엔 플레이어보다 나중에(위에) 그림.
+- FR-13.6 눈(방향 표시): 그 프레임에 실제로 이동한 방향을 가리킴.
+
+### FR-14. 입력
+- FR-14.1 이동: `KeyA`/`KeyD` (연속 입력). 점프: `KeyW` 또는 `Space` (단발). 공격: 마우스 좌클릭(`Mouse0`, 단발). 표류: 마우스 우클릭(`Mouse2`, 단발).
+- FR-14.2 마우스 우클릭 시 브라우저 기본 컨텍스트 메뉴 표시 안 함.
+- FR-14.3 `WATCHED_KEYS`(`KeyA/KeyD/KeyW/Space`)는 브라우저 기본 동작(스크롤 등) 방지를 위해 `preventDefault` 처리.
+
+### FR-15. HUD
+- FR-15.1 HP 바(그라디언트) + 텍스트(`HP n / max`).
+- FR-15.2 공격 쿨다운 게이지: `active` 중엔 0%, `recovery` 중엔 `ATTACK_RECOVERY_DURATION` 기준으로 채워짐, `idle`이면 100%.
+- FR-15.3 표류 쿨다운 게이지: `drift` 상태 중엔 100%(보라색, "사용 중" 표시), 그 외엔 `driftCooldownTimer/driftCooldownDuration` 비율로 채워짐(어떤 쿨다운이 적용됐는지와 무관하게 항상 정확한 비율).
+
+## 5. 비기능 요구사항
+
+- **NFR-1 성능**: 60fps 목표. 프레임 간 `dt`는 0.033초로 클램프해 탭 전환 등으로 인한 프레임 급증 시 물리 발산을 방지.
+- **NFR-2 이식성**: `<canvas>` 2D 컨텍스트와 표준 DOM 이벤트만 사용하는 최신 데스크톱 브라우저에서 별도 설치/빌드 없이 동작.
+- **NFR-3 유지보수성**: 모든 밸런스 수치는 `CONFIG` 객체 하나에 집중되어 있어, 로직 코드를 건드리지 않고 숫자만 바꿔 튜닝 가능. 파생 관계가 있는 값(예: 표류 쿨다운)은 상수 대신 함수로 계산해 관계가 자동으로 유지되도록 함.
+- **NFR-4 공정성**: 인식/반응 지연이 있는 로직(체이서 폴링)도 실제 피해 판정(명중 여부)만큼은 항상 지연 없는 실시간 위치로 계산 — "반응이 느린 것"과 "판정이 불공정한 것"을 분리.
+- **NFR-5 무상태 배포**: 서버/DB/세션 없음. 정적 파일 배포(Vercel)만으로 전체 기능 동작.
+
+## 6. 데이터 모델 요약
+
+### player
+`x,y,w,h,vx,vy,facing,onGround,jumpsUsed,hp,invincibleTimer,attackState,attackTimer,hitEnemiesThisSwing,state(anchor|drift),driftTimer,driftCooldownTimer,driftCooldownDuration,pendingDamage[],driftTrail[],driftBurst`
+
+### enemy (공통) / turret 전용 / chaser 전용
+공통: `id,type,spawnX,spawnY,x,y,w,h,hp,maxHp,alive,flashTimer,hasBeenVisible,stunnable`
+turret: `fireTimer,telegraphing`
+chaser: `patrolMinX,patrolMaxX,facing,aiState,attackTimer,stunTimer,perceptionTimer,perceivedPlayerX,perceivedPlayerY`
+
+### projectile
+`x,y,vx,vy,r,damage`
+
+### 전역 타임스톱 상태
+`timeStopTimer,timeStopDuration,timeStopReason(damage|counter|null),timeStopOnComplete`
+
+## 7. 부록 — CONFIG 파라미터 전체 목록
+
+| 그룹 | 키 | 현재값 |
+|---|---|---|
+| 이동 | MOVE_SPEED / GRAVITY / MAX_FALL_SPEED / JUMP_FORCE / MAX_JUMPS | 420 / 2100 / 1400 / 760 / 2 |
+| 근접 공격 | ATTACK_RANGE_W/H / ATTACK_ACTIVE_DURATION / ATTACK_RECOVERY_DURATION / ATTACK_DAMAGE | 85/75 / 0.08 / 0.30 / 1 |
+| 플레이어 | PLAYER_MAX_HP / HIT_INVINCIBILITY_DURATION / RESPAWN_DELAY / PIT_FALL_BUFFER | 5 / 0.5 / 1.2 / 60 |
+| 포탑 | TURRET_FIRE_INTERVAL / TURRET_TELEGRAPH_DURATION / TURRET_MAX_HP / PROJECTILE_SPEED/RADIUS/DAMAGE | 2.2 / 0.5 / 5 / 260 / 8 / 1 |
+| 카메라 | CAMERA_SMOOTHING / CAMERA_DEADZONE_W | 6 / 160 |
+| 체이서 | CHASER_MAX_HP / PATROL_SPEED / CHASE_SPEED | 3 / 90 / 260 |
+| 체이서 범위 | DETECTION_RANGE / DETECTION_VERTICAL_RANGE / LEASH_RANGE / ATTACK_RANGE_W/H | 480 / 130 / 650 / 130/130 |
+| 체이서 타이밍 | ATTACK_TELEGRAPH_DURATION / ATTACK_RECOVERY_DURATION / ATTACK_DAMAGE / STUN_DURATION / PERCEPTION_INTERVAL | 0.65 / 0.6 / 2 / 0.5 / 0.1 |
+| 유령 NPC | GHOST_NPC_FOLLOW_OFFSET / GHOST_NPC_FOLLOW_SMOOTHING | 40 / 10 |
+| 표류 | DAMAGE_GRACE_PERIOD / DRIFT_DURATION | 0.5 / 0.4 |
+| 표류 쿨다운 | COOLDOWN_COUNTER_MARGIN / COOLDOWN_WHIFF_EXTRA (→ 계산값 1.4s / 2.2s) | 0.4 / 0.8 |
+| 표류 반격 | ATTACK_RANGE_W/H / COUNTER_DAMAGE_MULTIPLIER / EMPTY_SELF_DAMAGE / BURST_VISUAL_DURATION | 230/200 / 2 / 1 / 0.12 |
+| 타임스톱 | HITSTOP_DURATION / HITSTOP_DOUBLE_HIT_GAP | 0.3 / 0.66 |
+
+수치의 의미와 서로간의 관계(특히 왜 특정 값이 다른 값보다 커야 하는지)에 대한 상세 설명은 `index.html`의 `CONFIG` 객체 내 인라인 주석 및 파일 최상단 "게임 개요" 주석 블록을 참고.
