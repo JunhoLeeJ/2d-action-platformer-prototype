@@ -17,6 +17,18 @@ const pendingKeyAfterFreeze = {};
 const WATCHED_KEYS = ["KeyA", "KeyD", "KeyW", "Space"]; // 브라우저 기본 동작(스크롤 등)을 막을 키
 
 function handlePress(code) {
+  // 메뉴 오버레이(QA 패널/일시정지 메뉴/메인 메뉴/확인 대화상자)가 떠 있는 동안엔 이 키 입력이 메뉴 탐색용이지
+  // 게임플레이 입력이 아니다 - 여기서 아예 기록하지 않아야 한다. 메뉴 쪽 키 라우팅은 pausemenu.js가
+  // 전담하는데(그 파일의 keydown 리스너가 이 리스너보다 나중에 등록되어 같은 이벤트 안에서 항상 이
+  // 다음에 실행됨), 그게 Space/Enter로 메뉴 항목을 확정하는 바로 그 키 입력이 여기서도 동시에
+  // "게임플레이 키가 방금 눌림"으로 기록돼버리면(qaPanelOpen 등을 안 가리고 무조건 기록했었음), 메뉴를
+  // 키보드로 닫는 순간 그 justPressed가 다음 게임 프레임까지 그대로 살아남아 캐릭터가 의도치 않게
+  // 반응한다 - 실제로 겪은 버그: 메인 메뉴에서 Space로 "게임 시작"을 확정하면 그 즉시 캐릭터가
+  // 점프해버림(최초 부팅 시 loop()의 dt 음수 버그와 겹치면 그 점프가 바닥을 뚫고 낙사로 이어짐 -
+  // js/main.js 참고). qaPanelOpen/pauseMenuOpen/mainMenuOpen은 이 파일보다 늦게 로드되는 파일들이
+  // 선언하지만, 이 함수는 실제 keydown이 일어나는 "호출 시점"에만 참조되므로 문제없다(파싱 순서가
+  // 아니라 호출 시점에 이미 다 로드돼 있음 - CLAUDE.md 참고).
+  if (qaPanelOpen || pauseMenuOpen || mainMenuOpen || confirmDialogOpen) return;
   if (!heldKeys[code]) {
     if (timeStopTimer > 0) pendingKeyAfterFreeze[code] = true;
     else justPressed[code] = true;

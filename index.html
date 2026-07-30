@@ -246,6 +246,12 @@
     color: #999;
     margin: 4px 0 14px;
   }
+  /* 메인 메뉴/일시정지 메뉴용 - #qaPanelHint와 같은 스타일이지만 ID 하나에 묶여있지 않은 재사용 클래스 */
+  .menuHint {
+    font-size: 12px;
+    color: #999;
+    margin-top: -4px;
+  }
   .qaPanelFloorHeading {
     font-size: 13px;
     font-weight: bold;
@@ -283,6 +289,51 @@
     outline: 2px solid #4fc3f7;
     outline-offset: -1px;
   }
+  /* 메인 메뉴/일시정지 메뉴의 W/S 키보드 탐색 강조 표시 (js/engine/menunav.js) - QA 패널의
+     .qaPanelZoneBtnFocused와 같은 스타일을 그대로 재사용. */
+  .menuBtnFocused {
+    outline: 2px solid #4fc3f7;
+    outline-offset: -1px;
+  }
+  /* 확인 대화상자(js/engine/confirmdialog.js) - 구역 워프/메인 화면 이동처럼 되돌리기 번거로운
+     동작 전에 "예/아니오"를 한 번 더 묻는다. QA 패널(z-index 10) 위에도, 일시정지 메뉴 위에도 뜰 수
+     있어야 해서 그보다 높은 z-index를 씀. 다른 오버레이와 동일하게 기본값은 반드시 none으로 시작 -
+     안 그러면 페이지를 열자마자 이 화면이 다른 걸 가려버리는 버그가 재발함(#pauseMenu에서 실제로
+     겪은 사례, CLAUDE.md 참고). */
+  #confirmDialog {
+    position: absolute;
+    inset: 0;
+    background: rgba(10, 10, 14, 0.82);
+    display: none;
+    z-index: 11;
+    align-items: center;
+    justify-content: center;
+  }
+  #confirmDialogCard {
+    background: rgba(20, 21, 26, 0.96);
+    border: 2px solid #555b6e;
+    border-radius: 8px;
+    padding: 24px 28px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    max-width: 360px;
+  }
+  #confirmDialogMessage {
+    font-size: 15px;
+    text-align: center;
+    line-height: 1.4;
+  }
+  #confirmDialogBtnRow {
+    display: flex;
+    gap: 10px;
+  }
+  #confirmDialogBtnRow .mainMenuBtn {
+    width: 100px;
+    padding: 10px 0;
+    font-size: 14px;
+  }
 </style>
 </head>
 <body>
@@ -313,7 +364,7 @@
   <div id="qaPanel">
     <div id="qaPanelCard">
       <div id="qaPanelTitle">구역 이동</div>
-      <div id="qaPanelHint">클릭 또는 W/S로 고르고 Space로 이동 · ` 또는 Esc로 닫기</div>
+      <div id="qaPanelHint">클릭 또는 W/S로 고르고 Space/Enter로 이동 · ` 또는 Esc로 닫기</div>
       <div id="qaPanelList"></div>
     </div>
   </div>
@@ -321,12 +372,23 @@
     <div id="mainMenuTitle">2D 액션 플랫포머 프로토타입</div>
     <button id="mainMenuStartBtn" class="mainMenuBtn" type="button">게임 시작</button>
     <button id="mainMenuZoneSelectBtn" class="mainMenuBtn" type="button">구역 선택</button>
+    <div class="menuHint">W/S로 고르고 Space/Enter로 선택</div>
   </div>
   <div id="pauseMenu">
     <div id="pauseMenuTitle">일시정지</div>
     <button id="pauseResumeBtn" class="mainMenuBtn" type="button">재개</button>
     <button id="pauseMainMenuBtn" class="mainMenuBtn" type="button">메인 화면</button>
     <button id="pauseZoneSelectBtn" class="mainMenuBtn" type="button">구역 선택</button>
+    <div class="menuHint">W/S로 고르고 Space/Enter로 선택 · ` 또는 Esc로 닫기</div>
+  </div>
+  <div id="confirmDialog">
+    <div id="confirmDialogCard">
+      <div id="confirmDialogMessage"></div>
+      <div id="confirmDialogBtnRow">
+        <button id="confirmDialogYesBtn" class="mainMenuBtn" type="button">예</button>
+        <button id="confirmDialogNoBtn" class="mainMenuBtn" type="button">아니오</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -347,12 +409,15 @@
 <script src="js/engine/checkpoint.js"></script>
 <script src="js/engine/cutscene.js"></script>
 <script src="js/engine/qapanel.js"></script>
+<script src="js/engine/menunav.js"></script>
+<script src="js/engine/confirmdialog.js"></script>
 <script src="js/rendering.js"></script>
 <script src="js/levels/f2z3-legacy-arena.js"></script>
 <script src="js/levels/f1z1-entry.js"></script>
 <script src="js/levels/f1z2-platforms.js"></script>
 <script src="js/levels/f1z3-melee-practice.js"></script>
 <script src="js/levels/f1z4-background-monsters.js"></script>
+<script src="js/levels/f1z5-fatal-encounter.js"></script>
 <script src="js/engine/mainmenu.js"></script>
 <script src="js/engine/pausemenu.js"></script>
 <script src="js/main.js"></script>

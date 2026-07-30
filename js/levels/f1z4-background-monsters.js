@@ -57,15 +57,14 @@
       { id: "start", x: 40, y: standingTopY, active: false },
     ],
 
-    // 오른쪽 문 - 진짜 다음 구역(구역 5: 치명상 씬)이 아직 없어서 **임시로** 2층 구역 3(레거시 아레나)에
-    // 연결해둠(사용자 확인) - 구역 5를 만들면 targetZoneId를 그걸로 바꿔치기할 것. 땅바닥 문이라 다른
-    // 존과 동일하게 yMax+landingY를 챙김(CLAUDE.md 관례). 봉쇄 벽(x:1650)이 이 문(x:1720)보다 왼쪽에
-    // 있어서, 적 A 둘을 잡아 게이트가 열리기 전엔 물리적으로 이 문에 닿을 수조차 없다.
+    // 오른쪽 문 - 구역 5(치명상 씬)로 연결. 땅바닥 문이라 다른 존과 동일하게 yMax+landingY를 챙김
+    // (CLAUDE.md 관례). 봉쇄 벽(x:1650)이 이 문(x:1720)보다 왼쪽에 있어서, 적 A 둘을 잡아 게이트가
+    // 열리기 전엔 물리적으로 이 문에 닿을 수조차 없다.
     doors: {
       left: { x: 40, y: groundY - doorH, w: 40, h: doorH },
       right: {
         x: 1720, y: groundY - doorH, w: 40, h: doorH,
-        targetZoneId: "f2z3_legacy_arena", yMax: standingTopY + 25, landingY: groundY,
+        targetZoneId: "f1z5_fatal_encounter", yMax: standingTopY + 25, landingY: groundY,
       },
     },
 

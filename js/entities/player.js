@@ -175,6 +175,28 @@ function resolveSolidVerticalCollisions() {
   }
 }
 
+// 원웨이(관통형) 플랫폼 세로 충돌 판정 - 오직 "위에서 떨어져 착지"할 때만 막힘(아래에서 위로 통과하는
+// 것/이미 아래에 있던 경우는 그대로 통과). prevBottom(이번 프레임에 움직이기 전 발 바닥 위치)을 받아야
+// "위에서 왔는지"를 판단할 수 있어 인자로 받는다. resolveSolidVerticalCollisions()와 마찬가지로
+// updatePlayer의 Y축 처리와 zones.js의 컷신 낙하 틱(makeFallUntilGroundedTick)이 이 로직을 공유한다 -
+// 트리거 발동 시 공중이었던 플레이어를 "자연스럽게 착지"시키는 연출이 원웨이 발판(예: f1z2_platforms의
+// 샤프트 꼭대기 착지대) 위에서도 고정형 플랫폼과 동일하게 정확히 동작해야 하기 때문.
+function resolveOneWayVerticalCollisions(prevBottom) {
+  for (const p of currentZone.oneWayPlatforms) {
+    const horizontallyOverlapping = player.x + player.w > p.x && player.x < p.x + p.w;
+    if (!horizontallyOverlapping) continue;
+    const newBottom = player.y + player.h;
+    const wasAboveSurface = prevBottom <= p.y + 0.5;
+    if (player.vy >= 0 && wasAboveSurface && newBottom >= p.y) {
+      player.y = p.y - player.h;
+      player.vy = 0;
+      player.onGround = true;
+      player.jumpsUsed = 0;
+      player.airAttacksUsed = 0;
+    }
+  }
+}
+
 function updatePlayer(dt) {
   // --- 타이머 ---
   if (player.invincibleTimer > 0) player.invincibleTimer -= dt;
@@ -378,19 +400,7 @@ function updatePlayer(dt) {
 
   // 원웨이(관통형) 플랫폼: 오직 "위에서 떨어져 착지"할 때만 막힘.
   // 아래에서 위로 통과하거나(vy < 0), 이미 플랫폼 아래에 있던 경우는 그대로 통과시킴.
-  for (const p of currentZone.oneWayPlatforms) {
-    const horizontallyOverlapping = player.x + player.w > p.x && player.x < p.x + p.w;
-    if (!horizontallyOverlapping) continue;
-    const newBottom = player.y + player.h;
-    const wasAboveSurface = prevBottom <= p.y + 0.5;
-    if (player.vy >= 0 && wasAboveSurface && newBottom >= p.y) {
-      player.y = p.y - player.h;
-      player.vy = 0;
-      player.onGround = true;
-      player.jumpsUsed = 0;
-      player.airAttacksUsed = 0;
-    }
-  }
+  resolveOneWayVerticalCollisions(prevBottom);
 
   // 낙사 판정: 바닥 구멍으로 떨어져 존 아래로 일정 거리 이상 벗어나면 사망. 화면(H) 기준이 아니라
   // 존의 전체 세로 크기(currentZone.height) 기준 - 세로로 긴 존에서는 카메라에 안 보이는 곳까지도

@@ -15,6 +15,12 @@
      animation({entityRef, anim, duration}) - entity.cutsceneAnim 세팅 (실제 렌더링은 아직 없음 - 훅만)
      fade({color, outDuration, holdDuration, inDuration, onMidpoint}) - 암전/화이트아웃, 완전히 어두운
                                        순간(onMidpoint)에 배경/위치를 바꿔치기할 수 있음
+     screenGlitch({duration})        - 화면 전체에 랜덤 지지직(글리치) 노이즈를 0->1로 램프업시키며
+                                       duration초 동안 재생 (rendering.js의 drawScreenGlitch가 매 프레임
+                                       screenGlitchIntensity를 읽어서 그림 - 저장된 애니메이션 상태 없이
+                                       매 프레임 새로 랜덤 생성되는 노이즈라 겹쳐써도 안전함). 1층 구역
+                                       5(치명상 씬)에서 처음 쓰이지만 이후 다른 긴장감 있는 컷신에도
+                                       재사용할 수 있게 존 전용이 아니라 여기 엔진에 둠.
      callback({fn})                  - 그 프레임에 즉시 실행하고 바로 다음으로
      custom({tick, onStart})         - 매 프레임 tick(dt)를 호출, true를 반환하면 다음 이벤트로 진행.
                                        gameState==="cutscene"이라 updatePlayer가 안 도는 동안 임시로
@@ -41,6 +47,11 @@ let activeSequence = null; // { events, index, onDone, eventTimer, fadeElapsed, 
 // endSequence()가 현재 시퀀스를 끝맺는 시점에 여기 있으면 곧바로 이어서 시작한다 - 그 사이에 플레이어가
 // 조작을 되찾는 프레임이 단 한 프레임도 끼어들지 않는다.
 let pendingAutoTrigger = null;
+
+// "screenGlitch" 이벤트가 재생 중일 때 0~1 - rendering.js의 drawScreenGlitch가 매 프레임 이 값만
+// 읽어서 노이즈 세기를 정한다. fadeOverlayEl과 달리 DOM이 아니라 canvas에 매 프레임 새로 그려지므로
+// (drawScreenGlitch 자체가 저장 상태 없이 Math.random()을 직접 씀) 이 값 하나만 0<->1로 오가면 된다.
+let screenGlitchIntensity = 0;
 
 // 한 번 재생한 walkIn/auto 트리거는(repeatable이 아닌 한) 다시 안 튼다 - "zoneId:triggerId"로 키를 잡아서
 // 리스폰으로 같은 존을 다시 불러와도(loadZone은 이 Set을 건드리지 않음) 스토리 비트가 중복 재생되지 않는다.
@@ -92,6 +103,22 @@ function endFade() {
   fadeOverlayEl.style.opacity = "0";
 }
 
+// screenGlitch - fade와 같은 "elapsed/total을 activeSequence에 얹어 매 프레임 갱신" 패턴이지만,
+// DOM opacity 대신 screenGlitchIntensity(위)를 0->1로 램프업만 시킨다 - 실제로 노이즈를 그리는 건
+// rendering.js 몫.
+function startGlitch(ev) {
+  activeSequence.glitchElapsed = 0;
+  activeSequence.glitchTotal = ev.duration;
+  screenGlitchIntensity = 0;
+}
+function updateGlitch(dt, ev) {
+  activeSequence.glitchElapsed += dt;
+  screenGlitchIntensity = clamp(activeSequence.glitchElapsed / ev.duration, 0, 1);
+}
+function endGlitch() {
+  screenGlitchIntensity = 0;
+}
+
 function runEvent(ev) {
   switch (ev.type) {
     case "dialogue":
@@ -112,6 +139,9 @@ function runEvent(ev) {
       break;
     case "fade":
       startFade(ev);
+      break;
+    case "screenGlitch":
+      startGlitch(ev);
       break;
     case "callback":
       if (ev.fn) ev.fn();
@@ -154,6 +184,15 @@ function updateSequence(dt) {
     return;
   }
 
+  if (ev.type === "screenGlitch") {
+    updateGlitch(dt, ev);
+    if (activeSequence.glitchElapsed >= activeSequence.glitchTotal) {
+      endGlitch();
+      advanceSequence();
+    }
+    return;
+  }
+
   // cameraHold / animation - 단순 카운트다운, dt마다 무조건 줄어드니 절대 안 걸림(dangle 불가)
   activeSequence.eventTimer -= dt;
   if (activeSequence.eventTimer <= 0) advanceSequence();
@@ -182,6 +221,7 @@ function advanceSequence() {
 // 어떤 이벤트 타입에서 끝나든 뒷정리가 누락될 수 없다.
 function endSequence() {
   cameraOverrideTarget = null;
+  screenGlitchIntensity = 0; // 방어적 백스톱 - 글리치 도중 워프 등으로 시퀀스가 강제 종료돼도 화면에 남지 않게
   hideTextbox();
   const onDone = activeSequence.onDone;
   const pending = pendingAutoTrigger;
@@ -203,7 +243,18 @@ function fireTrigger(trigger, zoneId) {
   if (!trigger.repeatable) seenTriggerIds.add(key);
   // sequence는 고정 배열이거나, 발동 시점에 평가할 함수일 수 있다(§ 위 이벤트 타입 설명 참고).
   const events = typeof trigger.sequence === "function" ? trigger.sequence() : trigger.sequence;
-  startSequence(events);
+  // 발동 순간 플레이어가 아직 공중(점프 중)이었다면, 실제 이벤트가 시작되기 전에 "자연스러운 착지"
+  // 비트를 먼저 끼워 넣는다 - 안 그러면 컷신이 시작되는 순간(gameState==="cutscene", updatePlayer 정지)
+  // y좌표가 공중에 뜬 채 그대로 얼어붙어 보이거나, 개별 트리거가 각자 y를 순간이동시켜 임기응변해야
+  // 한다(1층 구역 5가 처음엔 이렇게 했었음 - 사용자 피드백으로 모든 트리거에 범용 적용됨). 문 전환도
+  // 예전엔 이 처리를 자기 것만 따로 갖고 있었지만(makeFallInPlaceTick) 이제 여기 한 곳으로 합쳐짐 -
+  // makeFallUntilGroundedTick(js/engine/zones.js)이 미리 정해진 landingY 없이도
+  // resolveSolidVerticalCollisions/resolveOneWayVerticalCollisions(player.js)의 "위에서 떨어져 착지"
+  // 판정에 기대어 범용으로 동작한다.
+  const finalEvents = player.onGround
+    ? events
+    : [{ type: "custom", tick: makeFallUntilGroundedTick() }, ...events];
+  startSequence(finalEvents);
 }
 
 // loadZone()이 새 존을 세팅한 직후 호출 - 그 존에 아직 재생 안 한 kind:"auto" 트리거가 있으면 튼다.

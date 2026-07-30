@@ -98,29 +98,34 @@ function isGateBlocking(gate, rect) {
   return isGateLocked(gate) && rect.x + rect.w > gate.x && rect.x < gate.x + gate.w;
 }
 
-// 문에서 아직 착지 못 한 채(공중에서) 트리거에 걸린 경우 전용 - 조작권을 뺏은 채 제자리(가로 고정)에서
-// landingY까지 중력만 적용해 떨어뜨린다. gameState가 "cutscene"이라 updatePlayer 자체가 안 도는 동안엔
-// 중력도 안 걸리므로, 이 틱 함수가 그동안 대신 최소한의 낙하 물리를 흉내낸다 - 착지하면 true를 반환해
-// 다음 이벤트(오른쪽으로 걸어나가기)로 넘어간다.
-function makeFallInPlaceTick(landingY) {
-  return function fallInPlaceTick(dt) {
+// 트리거 발동 순간 플레이어가 아직 공중(점프 중)이었을 때, 조작권을 뺏은 채 제자리(가로 고정)에서
+// "자연스럽게 착지"할 때까지 중력만 적용해 떨어뜨리는 범용 커스텀 틱. gameState가 "cutscene"이라
+// updatePlayer 자체가 안 도는 동안엔 중력도 안 걸리므로, 이 틱 함수가 그동안 대신 최소한의 낙하 물리를
+// 흉내낸다 - 착지하면(onGround가 자연스럽게 true가 되면) true를 반환해 다음 이벤트로 넘어간다.
+//
+// fireTrigger()(js/engine/cutscene.js)가 "발동 시점에 플레이어가 공중이었는지"만 보고 **모든** 트리거의
+// 시퀀스 맨 앞에 이 틱을 자동으로 붙여준다 - 원래는 문 전환 전용(makeFallInPlaceTick, 미리 정해진
+// landingY 하나로 떨어뜨림)이었지만, 사용자 요청("트리거존 나올 때마다 점프를 자연스럽게 캔슬해주는
+// 연출을 넣어달라")으로 범용화됨. 특정 landingY를 몰라도 되는 이유: resolveSolidVerticalCollisions()/
+// resolveOneWayVerticalCollisions()(둘 다 player.js, updatePlayer의 Y축 처리와 동일한 함수를 공유)가
+// 이미 "위에서 떨어져 착지"를 판정하는 범용 로직이라, 그 판정에 그대로 기대면 존/문마다 다른 착지면을
+// 몰라도 자동으로 맞는 바닥(고정형이든 원웨이든)에서 멈춘다. vy를 강제로 리셋하지 않고 중력만 계속
+// 적용하므로(여전히 상승 중이었다면 자연스럽게 감속->정점->낙하로 이어짐) "점프를 뚝 끊는" 게 아니라
+// "점프의 나머지 궤적을 자연스럽게 완주시키는" 연출이 된다.
+function makeFallUntilGroundedTick() {
+  return function fallUntilGroundedTick(dt) {
+    const prevBottom = player.y + player.h;
     player.vx = 0;
     player.vy += CONFIG.GRAVITY * dt;
     if (player.vy > CONFIG.MAX_FALL_SPEED) player.vy = CONFIG.MAX_FALL_SPEED;
     player.y += player.vy * dt;
-    // 트리거가 발동한 순간 아직 상승 중(이단 점프 관성)이었다면, 여기서도 천장에 막혀야 한다 -
-    // updatePlayer와 완전히 같은 판정을 재사용(player.js 참고. 안 그러면 이 틱 동안은 순수 낙하만
-    // 흉내내느라 충돌을 아예 안 봐서 천장을 뚫고 올라가 버림 - 실제로 발견된 버그).
+    player.onGround = false;
+    // 고정형/원웨이 둘 다 판정 - updatePlayer의 Y축 처리와 완전히 같은 함수를 공유(player.js 참고),
+    // 안 그러면 원웨이 발판(예: f1z2_platforms의 샤프트 꼭대기 착지대) 위에서 이 틱이 그냥 뚫고
+    // 지나가 버린다(원웨이는 resolveSolidVerticalCollisions가 보는 solidPlatforms에 없으므로).
     resolveSolidVerticalCollisions();
-    if (player.y + player.h >= landingY) {
-      player.y = landingY - player.h;
-      player.vy = 0;
-      player.onGround = true;
-      player.jumpsUsed = 0;
-      player.airAttacksUsed = 0;
-      return true;
-    }
-    return false;
+    resolveOneWayVerticalCollisions(prevBottom);
+    return player.onGround;
   };
 }
 
@@ -131,6 +136,29 @@ function walkRightOffscreenTick(dt) {
   player.vx = CONFIG.MOVE_SPEED;
   player.x += player.vx * dt;
   return player.x > camera.x + W;
+}
+
+// "느린 걸음" - 조작권을 뺏은 채 targetX까지 강제로 천천히 걸어가게 하는 범용 컷신 틱(custom 이벤트용).
+// makeFallUntilGroundedTick/walkRightOffscreenTick과 같은 자리에 두는 이유도 같다 - 문 연출 전용이 아니라
+// 어떤 트리거의 sequence에서도 재사용할 범용 헬퍼이기 때문. walkRightOffscreenTick과 마찬가지로
+// 일부러 지형 충돌을 안 거친다(이미 스크립트로 짜여진 연출이라 실제 지형과 무관하게 정확히 targetX까지
+// 가는 게 목적) - 이 헬퍼를 쓰는 존은 그 경로에 장애물을 두지 않아야 한다. 1층 구역 5(치명상 씬)에서
+// 처음 쓰이지만 "느린 걸음" 자체는 보스전 등 다른 컷신에도 재사용될 예정(ROADMAP.md 참고)이라 존 파일이
+// 아니라 여기 엔진에 둔다.
+function makeSlowWalkTick(targetX, speed) {
+  return function slowWalkTick(dt) {
+    const dir = targetX >= player.x ? 1 : -1;
+    player.vx = dir * speed;
+    player.facing = dir;
+    player.x += player.vx * dt;
+    const arrived = dir > 0 ? player.x >= targetX : player.x <= targetX;
+    if (arrived) {
+      player.x = targetX;
+      player.vx = 0;
+      return true;
+    }
+    return false;
+  };
 }
 
 // 오른쪽 문(doors.right)을 "걸어 들어가면 페이드 후 다음 존으로 이동"하는 트리거로 변환.
@@ -144,9 +172,12 @@ function walkRightOffscreenTick(dt) {
 // 땅바닥처럼 훨씬 아래에 있는 위치는 제외한다.
 //
 // door.landingY(선택) - 이 문에 대응하는 착지대의 표면 y. 있으면 트리거 발동 시점에 플레이어가 아직
-// 공중(!player.onGround)이었는지 확인해서, 공중이면 즉시 암전하는 대신 제자리 낙하->오른쪽으로 걸어
-// 화면 밖으로 사라짐->암전 순서로 이어붙인 시퀀스를 재생한다(공중에서 갑자기 얼어붙은 채 바로
-// 암전되는 어색함을 없애기 위함). 이미 착지한 채(onGround) 걸어 들어온 경우는 기존과 동일하게 즉시 암전.
+// 공중(!player.onGround)이었는지 확인해서, 공중이면 즉시 암전하는 대신 오른쪽으로 걸어 화면 밖으로
+// 사라짐->암전 순서로 이어붙인 시퀀스를 재생한다(공중에서 갑자기 얼어붙은 채 바로 암전되는 어색함을
+// 없애기 위함). "공중이었다면 자연스럽게 착지부터"는 이제 fireTrigger()(js/engine/cutscene.js)가
+// **모든** 트리거에 범용으로 붙여주므로 여기서 따로 안 함(사용자 요청으로 범용화됨, § 위
+// makeFallUntilGroundedTick 참고) - 문에만 필요한 "착지 후 오른쪽으로 걸어나가기"만 이 함수가 챙긴다.
+// 이미 착지한 채(onGround) 걸어 들어온 경우는 기존과 동일하게 즉시 암전.
 function makeDoorTrigger(door) {
   const transitionFade = {
     type: "fade",
@@ -176,7 +207,6 @@ function makeDoorTrigger(door) {
     sequence: () => {
       if (door.landingY == null || player.onGround) return [transitionFade];
       return [
-        { type: "custom", tick: makeFallInPlaceTick(door.landingY) },
         { type: "custom", tick: walkRightOffscreenTick },
         transitionFade,
       ];

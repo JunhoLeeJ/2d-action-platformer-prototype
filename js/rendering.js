@@ -74,6 +74,60 @@ function drawMimeBProp(prop) {
   drawRect(prop, pulse > 0.5 ? brightColor : dimColor);
 }
 
+// 1층 구역 5(치명상 씬) 전용 배경 장식 두 개 - 둘 다 mimeB처럼 순수 연출, enemies[]/전투 판정과 무관.
+//
+// reachingEntity - "손 뻗은 형체"(§ 5 아트 제약): 몸통 사각형 + 팔이 반복 없이 한 방향(왼쪽, 다가오는
+// 플레이어 쪽)으로 뻗은 채 고정된 정지 자세. mimeA(팔 흔들기)와 달리 애니메이션 자체가 없음 - 저장
+// 상태도 필요 없어 인자로 받은 좌표만으로 매번 같은 모양을 그린다.
+function drawReachingEntityProp(prop) {
+  drawRect(prop, "#3a2e35");
+  const armLen = prop.w * 1.6, armThick = 7;
+  ctx.fillStyle = "#3a2e35";
+  ctx.fillRect(prop.x - armLen, prop.y + prop.h * 0.35 - armThick / 2, armLen, armThick);
+}
+
+// fragmentObject - reachingEntity가 뻗은 손이 향하는 조각(정체는 아직 스펙에 없음, 플레이스홀더).
+// 시각적 동작은 규정돼 있지 않아 mimeB와 같은 pulse 패턴만 아주 옅게 얹어 "주목할 물건"이라는 것만
+// 표시한다 - prop.x를 위상에 섞어 향후 여러 개가 있어도 서로 안 겹치게(§ 6 ROADMAP 패턴 재사용).
+function drawFragmentObjectProp(prop) {
+  const cx = prop.x + prop.w / 2, cy = prop.y + prop.h / 2;
+  const pulse = (Math.sin(performance.now() / 500 + prop.x) + 1) / 2;
+  ctx.save();
+  ctx.shadowColor = "#7fd3ff";
+  ctx.shadowBlur = 6 + pulse * 6;
+  ctx.fillStyle = "#bdeeff";
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - prop.h / 2);
+  ctx.lineTo(cx + prop.w / 2, cy);
+  ctx.lineTo(cx, cy + prop.h / 2);
+  ctx.lineTo(cx - prop.w / 2, cy);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+// 화면 지지직(글리치) - cutscene.js의 "screenGlitch" 이벤트가 screenGlitchIntensity(0~1)를 램프업하는
+// 동안 매 프레임 호출됨. 저장 상태 없이 매 프레임 Math.random()으로 새로 노이즈를 그려서 저절로
+// 깜빡이게 함(포탑 예고 pulse 등 기존 "상태 없는 도형 애니메이션" 패턴과 같은 정신 - 다만 이번엔 sin
+// 대신 random이라 매 프레임 결과가 달라지는 "지지직"스러운 결이 남). 화면(screen) 좌표계에서 그려야
+// 하므로 draw()가 ctx.restore()로 카메라 translate를 푼 뒤에 호출된다.
+function drawScreenGlitch(intensity) {
+  if (intensity <= 0) return;
+  const barCount = Math.floor(3 + intensity * 9);
+  for (let i = 0; i < barCount; i++) {
+    const y = Math.random() * H;
+    const h = 2 + Math.random() * 16 * intensity;
+    const xOffset = (Math.random() - 0.5) * 50 * intensity;
+    const light = Math.random() > 0.5;
+    ctx.fillStyle = light
+      ? `rgba(255,255,255,${0.12 + 0.35 * intensity * Math.random()})`
+      : `rgba(10,10,14,${0.15 + 0.4 * intensity * Math.random()})`;
+    ctx.fillRect(xOffset, y, W, h);
+  }
+  ctx.fillStyle = `rgba(120,0,20,${0.15 * intensity})`;
+  ctx.fillRect(0, 0, W, H);
+}
+
 function draw() {
   ctx.clearRect(0, 0, W, H);
 
@@ -127,6 +181,8 @@ function draw() {
   // 배경 장식 (순수 연출, 전투 판정 없음 - drawMimeBProp 참고)
   for (const prop of currentZone.ambientProps || []) {
     if (prop.type === "mimeB") drawMimeBProp(prop);
+    else if (prop.type === "reachingEntity") drawReachingEntityProp(prop);
+    else if (prop.type === "fragmentObject") drawFragmentObjectProp(prop);
   }
 
   // 적 (포탑 + 체이서 공통 렌더링. 보라색 = 근접 공격으로도 스턴 안 걸리는 면역 개체 - 타입 공통 표시)
@@ -311,6 +367,11 @@ function draw() {
 
   ctx.restore();
   // ===== 여기부터 다시 화면(screen) 좌표계 =====
+
+  // 화면 지지직(글리치) - cutscene.js의 screenGlitch 이벤트가 진행 중일 때만 그려짐(그 외엔 intensity=0
+  // 이라 즉시 반환). 다른 화면 틴트(피격 유예/표류/타임스톱)보다 먼저 그려서, 그 위에 얹히는 붉은
+  // 타임스톱 틴트 등과 자연스럽게 겹치게 한다.
+  drawScreenGlitch(screenGlitchIntensity);
 
   // 유예시간 경고 - anchor 상태에서 맞아서 아직 확정 안 된 피해가 있으면 화면이 붉게 깜빡임.
   // 이 깜빡임이 보이는 동안 표류(우클릭)를 쓰면 지금 깜빡이는 피해가 취소되고 반격으로 축적된다.

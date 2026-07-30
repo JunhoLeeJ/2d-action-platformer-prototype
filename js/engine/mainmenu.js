@@ -25,21 +25,29 @@
 
 let mainMenuOpen = true; // 부트스트랩 시점엔 항상 보이는 채로 시작
 const mainMenuEl = document.getElementById("mainMenu");
+const mainMenuStartBtnEl = document.getElementById("mainMenuStartBtn");
+const mainMenuZoneSelectBtnEl = document.getElementById("mainMenuZoneSelectBtn");
+
+// W/S 이동 + Space/Enter 확정 - 버튼 두 개뿐인 정적 목록이라 항상 같은 배열을 반환하기만 하면 됨
+// (js/engine/menunav.js 참고, 실제 키 라우팅은 js/engine/pausemenu.js가 담당).
+const mainMenuNav = createMenuNav(() => [mainMenuStartBtnEl, mainMenuZoneSelectBtnEl]);
+mainMenuNav.reset(); // 페이지가 로드된 시점(=이 메뉴가 처음부터 보이는 중)에도 강조 표시가 바로 보이도록
 
 function showMainMenu() {
   mainMenuOpen = true;
   mainMenuEl.style.display = "flex";
+  mainMenuNav.reset();
 }
 function hideMainMenu() {
   mainMenuOpen = false;
   mainMenuEl.style.display = "none";
 }
 
-document.getElementById("mainMenuStartBtn").addEventListener("click", () => {
+mainMenuStartBtnEl.addEventListener("click", () => {
   hideMainMenu();
   warpToZone(BOOT_ZONE_ID);
 });
 
-document.getElementById("mainMenuZoneSelectBtn").addEventListener("click", () => {
+mainMenuZoneSelectBtnEl.addEventListener("click", () => {
   openQaPanel();
 });
