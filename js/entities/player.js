@@ -175,16 +175,28 @@ function updatePlayer(dt) {
     (player.attackState !== "idle" && !player.attackIsAirborne) ||
     player.postAttackLockTimer > 0;
 
-  // --- 조준 방향: 이동 방향과 무관하게, 매 프레임 마우스 커서가 있는 쪽을 향하도록 갱신.
-  // 근접 공격 판정(getAttackHitbox)이 이 값을 그대로 쓰기 때문에 "왼쪽으로 이동 중이어도
-  // 커서가 오른쪽이면 오른쪽을 공격"이 자동으로 성립한다. (표류 반격은 방향 무관 - 플레이어
-  // 중심 광역 판정이라 facing을 안 쓴다. performDriftCounterAttack 참고)
-  // 단, 지상 공격이 활성(active) 상태인 동안은 갱신을 건너뛴다 - 스윙 도중 마우스를 반대편으로
-  // 빠르게 옮겨도 판정/돌진 방향이 시작 시점 그대로 유지되게 하기 위함(공중 공격은 원래 방향
-  // 무관한 원형 판정이라 영향 없음). 공격을 누른 바로 그 프레임엔 attackState가 아직 이전 프레임의
-  // 값("idle")이라 정상적으로 갱신되고, 그다음 프레임부터 얼어붙는다.
+  // --- 좌우 이동 입력 계산 (A/D) - 아래 방향(facing) 판정이 이 값을 먼저 필요로 해서 vx 적용보다 앞에 뺌.
+  // groundAttackControlLocked인 동안은 입력 자체를 무시한다. 스윙의 active/recovery 상태 자체는 사실
+  // 이 게이트가 없어도 결과가 같다 - 아래 공격 처리 블록이 이동 입력 처리 "이후"에 실행되며 그 두
+  // 상태 동안의 vx를 각각 쏠림/정지로 다시 덮어쓰기 때문. 그래도 여기서 명시적으로 막아두는 이유는
+  // postAttackLockTimer 구간(attackState가 이미 "idle"이라 뒤에서 덮어쓸 코드가 없음)까지 같은
+  // 플래그 하나로 일관되게 처리하기 위함.
+  let move = 0;
+  if (!groundAttackControlLocked) {
+    if (heldKeys["KeyA"]) move -= 1;
+    if (heldKeys["KeyD"]) move += 1;
+  }
+
+  // --- 조준 방향(facing): 기본은 "가는 방향"이 주도권을 쥔다 ---
+  // 이동 입력이 있는 프레임(move !== 0)엔 그 방향으로 갱신하고, 가만히 서있으면(move === 0) 아예
+  // 건드리지 않아 직전 방향(마지막으로 이동한 방향, 혹은 아래 공격 입력 블록이 남겨둔 방향)을 그대로
+  // 유지한다 - 마우스는 여기서 안 본다. 마우스는 오직 "공격을 막 시작하는 그 순간"에만 아래 공격 입력
+  // 블록에서 별도로 이 값을 덮어써서, 그 순간만 마우스가 이동 방향보다 우선권을 가져가는 식으로 동작한다
+  // (예: 오른쪽으로 달리면서도 마우스가 왼쪽이면 왼쪽을 벤다). 지상 공격의 active 스윙 도중에는(항상
+  // 그래왔듯) 이동 여부와 무관하게 무조건 고정 - 스윙 방향이 중간에 바뀌면 판정/연출이 어긋나 보이기
+  // 때문(공중 공격은 원래 방향 무관 원형 판정이라 영향 없음).
   if (!(player.attackState === "active" && !player.attackIsAirborne)) {
-    player.facing = getMouseWorldX() < player.x + player.w / 2 ? -1 : 1;
+    if (move !== 0) player.facing = move;
   }
 
   // --- 표류 입력 (단발 - 우클릭 한 번으로 발동, 홀드/뗄 때 입력 불필요) ---
@@ -196,17 +208,6 @@ function updatePlayer(dt) {
   }
   updateDrift(dt);
 
-  // --- 좌우 이동 (A/D) ---
-  // groundAttackControlLocked인 동안은 입력 자체를 무시한다. 스윙의 active/recovery 상태 자체는 사실
-  // 이 게이트가 없어도 결과가 같다 - 아래 공격 처리 블록이 이동 입력 처리 "이후"에 실행되며 그 두
-  // 상태 동안의 vx를 각각 쏠림/정지로 다시 덮어쓰기 때문. 그래도 여기서 명시적으로 막아두는 이유는
-  // postAttackLockTimer 구간(attackState가 이미 "idle"이라 뒤에서 덮어쓸 코드가 없음)까지 같은
-  // 플래그 하나로 일관되게 처리하기 위함.
-  let move = 0;
-  if (!groundAttackControlLocked) {
-    if (heldKeys["KeyA"]) move -= 1;
-    if (heldKeys["KeyD"]) move += 1;
-  }
   player.vx = move * CONFIG.MOVE_SPEED;
   if (move !== 0) playerLastMoveDir = move; // 유령 NPC가 "진행 방향 반대편"을 계산할 때 씀 - 제자리에 서면 이전 방향 유지
 
@@ -214,10 +215,10 @@ function updatePlayer(dt) {
   player.vy += CONFIG.GRAVITY * dt;
   if (player.vy > CONFIG.MAX_FALL_SPEED) player.vy = CONFIG.MAX_FALL_SPEED;
 
-  // --- 점프 입력 (W 또는 Space, 둘 다 동일하게 동작) ---
+  // --- 점프 입력 (Space) ---
   // groundAttackControlLocked 동안은 점프도 막는다 - 원래 이동만 막고 점프는 그대로 통과되던 버그가
   // 있었음(지상 공격으로 "조작 불가" 상태인데 점프로는 빠져나갈 수 있었던 것 - 사용자 피드백으로 발견).
-  if ((justPressed["KeyW"] || justPressed["Space"]) && !getRuleFlag("disableJump") && !groundAttackControlLocked &&
+  if (justPressed["Space"] && !getRuleFlag("disableJump") && !groundAttackControlLocked &&
       player.jumpsUsed < CONFIG.MAX_JUMPS) {
     player.vy = -CONFIG.JUMP_FORCE;
     player.jumpsUsed += 1;
@@ -243,6 +244,11 @@ function updatePlayer(dt) {
   const attackInputActive = player.onGround ? heldKeys["Mouse0"] : justPressed["Mouse0"];
   if (attackInputActive && !getRuleFlag("disableAttack") && player.attackState === "idle" &&
       (player.onGround || player.airAttacksUsed < CONFIG.MAX_AIR_ATTACKS)) {
+    // 공격을 시작하는 이 순간엔 마우스 방향이 이동 방향보다 우선권을 가져간다(위 방향 갱신 블록 참고) -
+    // 그래야 예를 들어 오른쪽으로 달리는 중에도 마우스가 왼쪽이면 왼쪽을 벨 수 있다. 이후 스윙이
+    // active인 동안은 위 블록의 첫 줄 조건(attackState==="active") 때문에 이 값 그대로 고정되어
+    // 이동 방향이 다시 끼어들 수 없다 - 스윙이 끝나야(recovery 진입) 비로소 이동 방향이 재개된다.
+    player.facing = getMouseWorldX() < player.x + player.w / 2 ? -1 : 1;
     startAttack();
     // 숏홉: 공중 공격은 매번 상승 속도를 AIR_ATTACK_HOP_FORCE로 덮어써서 작은 점프를 하나 더 만들어준다.
     // jumpsUsed를 건드리지 않으므로 이단 점프를 다 쓴 뒤에도 나갈 수 있고, 점프 -> 이단 점프 -> 공중

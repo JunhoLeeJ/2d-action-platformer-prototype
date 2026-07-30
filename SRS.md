@@ -35,10 +35,11 @@
 ### FR-1. 이동 / 물리
 - FR-1.1 좌우 이동: `heldKeys["KeyA"/"KeyD"]`에 따라 `vx = ±MOVE_SPEED`(420px/s).
 - FR-1.2 중력: `vy += GRAVITY·dt`(2100px/s²), `MAX_FALL_SPEED`(1400px/s)로 클램프.
-- FR-1.3 점프: `KeyW` 또는 `Space` 중 하나라도 눌리는 순간(`justPressed`) `vy = -JUMP_FORCE`(760px/s). `jumpsUsed < MAX_JUMPS`(2)일 때만 허용 — 이단 점프. 바닥 착지 시 `jumpsUsed` 리셋.
+- FR-1.3 점프: `Space`가 눌리는 순간(`justPressed`) `vy = -JUMP_FORCE`(760px/s). `jumpsUsed < MAX_JUMPS`(2)이고 `groundAttackControlLocked`(FR-3.5b)가 아닐 때만 허용 — 이단 점프. 바닥 착지 시 `jumpsUsed` 리셋. 점프 트리거 즉시 `player.onGround`도 함께 `false`로 갱신됨(원래 Y축 처리 시점까지 미뤄졌던 것을 앞당김) — 점프와 공격을 같은 프레임에 누르면 바로 뒤이어 실행되는 공격 판정(FR-3.1)이 최신 접지 상태를 보게 하기 위함(FR-3.1b). 이전에는 `KeyW`도 동일하게 동작했으나 점프 전용 키를 `Space` 하나로 단순화함.
 - FR-1.4 지형 충돌: 고정형 플랫폼은 X/Y 양방향 모두 차단. 원웨이 플랫폼은 위에서 낙하해 착지할 때만(`vy≥0`이고 직전 프레임에 발판 위였을 때) 차단, 그 외엔 통과.
 - FR-1.5 낙사: `player.y > 캔버스높이 + PIT_FALL_BUFFER`(60px)가 되면 즉시 사망 처리.
 - FR-1.6 월드 경계: `player.x`는 `[0, WORLD_WIDTH - player.w]`로 클램프 (WORLD_WIDTH=3840).
+- FR-1.7 캐릭터 방향(`player.facing`, -1=왼쪽/1=오른쪽): 기본은 "가는 방향"이 주도권을 쥔다 — 좌우 이동 입력이 있는 프레임(`move !== 0`)마다 그 방향으로 갱신되고, 가만히 서있으면(`move === 0`) 전혀 건드리지 않아 직전 방향(마지막 이동 방향, 또는 아래 FR-3.2가 남겨둔 방향)을 그대로 유지한다. 지상 공격의 `active` 스윙 도중에는 이동 여부와 무관하게 무조건 고정(FR-3.2). 마우스 커서 방향은 이동 상태와 무관하게 이 값에 개입하지 않으며, 오직 공격을 "막 시작하는 그 순간"에만 FR-3.2가 별도로 이 값을 덮어써서 그 순간만 마우스가 이동 방향보다 우선권을 가져간다(예: 오른쪽으로 달리면서도 마우스가 왼쪽이면 왼쪽을 벤다).
 
 ### FR-2. 카메라
 - FR-2.1 화면 정중앙 기준 가로/세로 데드존(`CAMERA_DEADZONE_W`=160px, `CAMERA_DEADZONE_H`=140px) 안에서는 플레이어가 움직여도 카메라 고정 - 두 축이 서로 독립적으로 판정됨.
@@ -49,14 +50,14 @@
 - FR-3.1 좌클릭 시, 공격 상태가 `idle`이면 `active`로 전환. 트리거 조건은 지상/공중이 다름(FR-3.1a): 지상은 `heldKeys["Mouse0"]`(누르고 있는 동안 자동 연타), 공중은 `justPressed["Mouse0"]`(매번 새로 클릭). 이 시점의 `player.onGround`로 `attackIsAirborne`이 고정되어, 스윙 도중 착지/이륙해도 종류가 안 바뀜(`startAttack`).
 - FR-3.1a (홀드 연타 - 지상 전용) 지상 공격은 좌클릭을 누르고 있는 동안(`heldKeys["Mouse0"]`) `attackState`가 `idle`로 돌아올 때마다 자동으로 재발동된다("연타 피로도"를 줄이기 위한 사용자 요청). 공중 공격은 여전히 `justPressed["Mouse0"]`만 보므로 좌클릭을 쥐고 있어도 자동 재발동되지 않음 - FR-3.7의 착지 전 1회 제한(`MAX_AIR_ATTACKS`)이 원하는 타이밍보다 먼저 소모되지 않도록 일부러 분리함. 트리거 판정 시점의 `player.onGround`(FR-3.1b 참고로 이미 갱신된 값)로 두 분기를 나눔.
 - FR-3.1b (점프+공격 동시 입력 레이스 수정) 점프 트리거(FR-1.4 등) 순간 `player.onGround`를 즉시 `false`로 갱신한다 - 원래는 Y축 처리(같은 프레임 후반부)에서만 갱신되어, 같은 프레임에 점프와 공격을 동시에(또는 거의 동시에) 누르면 실제로는 막 공중으로 뜬 순간인데도 아직 `true`로 남아있는 `onGround`를 보고 지상 공격으로 오판정되는 문제가 있었음(사용자가 숏홉 콤보를 빠르게 연타하는 도중 실제로 겪은 간헐적 버그 - 지상 공격으로 오판정되면 지상 전용 조작 잠금(FR-3.5/3.5b)이 걸려 공중에서도 이동/재점프가 묶여버림). 점프 처리(공격 입력 처리보다 항상 먼저 실행됨)가 끝나는 즉시 `onGround`를 갱신해 바로 뒤이어 실행되는 공격 판정이 항상 최신 상태를 보게 함.
-- FR-3.2 (지상 공격) 방향은 `player.facing`을 그대로 씀 — 매 프레임 "마우스 커서가 플레이어 중심보다 왼쪽/오른쪽인지"로 갱신되며, 이동 입력과는 완전히 무관. 단, 지상 공격이 `active` 상태인 동안은 이 갱신이 멈춘다(스윙을 시작한 프레임에 한 번 확정된 뒤 그대로 고정) — 스윙 도중 마우스를 반대편으로 빠르게 옮겨도 판정/돌진 방향이 시작 시점 그대로 유지됨. 공중 공격은 방향 무관 원형 판정이라 이 고정의 영향을 받지 않음.
+- FR-3.2 (공격 방향은 `player.facing`을 그대로 씀, FR-1.7의 "이동 방향이 기본 주도권" 규칙에 대한 예외) 공격을 시작하는 그 프레임(`attackState`가 `idle`→트리거되는 순간)에 "마우스 커서가 플레이어 중심보다 왼쪽/오른쪽인지"로 `player.facing`을 그 자리에서 덮어씀 — 그 순간만큼은 이동 입력과 무관하게 마우스가 우선권을 가져간다. 지상 공격이 `active` 상태인 동안은 이후 이 값이 그대로 고정된다(스윙을 시작한 프레임에 한 번 확정된 뒤 FR-1.7의 이동-방향 갱신이 멈춤) — 스윙 도중 마우스를 반대편으로 빠르게 옮기거나 반대 방향으로 이동해도 판정/돌진 방향이 시작 시점 그대로 유지됨. `active`를 벗어나면(recovery 진입) FR-1.7의 이동-우선 규칙이 다시 매 프레임 적용되어, 계속 이동 중이었다면 그 방향으로 즉시 되돌아감. 공중 공격은 방향 무관 원형 판정이라 이 고정의 영향을 받지 않되, 시작 프레임에 마우스로 `facing`을 덮어쓰는 것 자체는 지상과 동일하게 일어남(시각적 방향 표시용).
 - FR-3.3 (지상 공격) 판정 박스: 가로 85px×세로 75px(`ATTACK_RANGE_W/H`), `facing` 방향으로 플레이어 옆에 배치하되 매 프레임 현재 `player.x`로 다시 계산됨(FR-3.3b의 돌진과 함께 앞으로 이동). 겹친 살아있는 적마다(한 스윙에 1회 한정) `ATTACK_DAMAGE`(1) 피해 + 스턴 적용.
 - FR-3.3a (공중 공격) `player.onGround`가 false일 때: 방향 무관, 플레이어 중심 기준 반지름 85px(`AIR_ATTACK_RADIUS`) 원형 판정(`circleRectOverlap`). 지상 공격(85×75)과 크기는 비슷하지만 방향 무관 원형이라 위/아래로 더 잘 닿고, 표류 반격(FR-6, 최대 리치 ~152px)보다는 확실히 좁음. 데미지는 지상 공격의 절반(`getAirAttackDamage()` = `ATTACK_DAMAGE/2` = 0.5) — 상수로 고정하지 않고 항상 `ATTACK_DAMAGE`에서 파생. 몬스터 HP는 부풀리지 않고 반칸(0.5) 단위 그대로 두며, 대신 체력 표시를 반칸 표현 가능한 마름모 pip로 바꿈(FR-9.1a/FR-10.1a, `drawHpPip`).
 - FR-3.3b (지상 공격 전용 돌진) `active` 상태인 동안 매 프레임 좌우 이동 입력을 무시하고 `player.vx`를 `player.facing × (GROUND_ATTACK_LUNGE_DISTANCE / GROUND_ATTACK_ACTIVE_DURATION)`(`getGroundAttackLungeSpeed()`)으로 강제 덮어씀 — "대시"가 아니라 검을 휘두른 반작용으로 몸이 아주 살짝(총 이동거리 `GROUND_ATTACK_LUNGE_DISTANCE`=10px) 쏠리는 정도. 속도가 아니라 총 이동거리로 정의되어 있어 활성 시간을 조정해도 쏠리는 거리 자체는 유지됨. 공중 공격은 영향 없음.
 - FR-3.4 활성 시간: 공중 공격은 0.08초(`ATTACK_ACTIVE_DURATION`), 지상 공격은 0.13초(`GROUND_ATTACK_ACTIVE_DURATION`, FR-3.3b의 돌진이 보이도록 살짝 늘림) 동안 판정.
 - FR-3.5 활성 종료 후 후딜레이: 공중 공격은 0.30초(`ATTACK_RECOVERY_DURATION`) 동안 재공격 불가하되 자유롭게 이동/점프 가능(기존 동작 유지). 지상 공격은 0.14초(`GROUND_ATTACK_RECOVERY_DURATION`, 공중과 별개 상수 - 원래 0.30이었으나 "가만히 서있는 시간이 너무 길다"는 피드백으로 절반 가까이 줄임) 동안 재공격 불가 + 좌우 이동도 완전히 멈춤(`player.vx=0` 강제) — "검을 휘두른 뒤 잠깐 멈춰서기".
 - FR-3.5a (지상 공격 전용 후속 잠금) `recovery`가 끝나 `attackState`가 `idle`로 돌아오는 순간, `player.postAttackLockTimer`가 `GROUND_ATTACK_POST_RECOVERY_LOCK_DURATION`(0.03s, 원래 0.08 - "쿨타임이 돌자마자 거의 바로 움직이고 싶다"는 피드백으로 거의 0에 가깝게 줄임)로 설정되어 그 시간만큼 좌우 이동 입력이 한 번 더 무시된다("연타하지 않았다면 조금 더 있다가 움직일 수 있음"). `attackState==="idle"`이면 언제든 재공격이 가능하므로, 이 잠금 시간이 끝나기 전에 다시 좌클릭하면 `startAttack()`이 `postAttackLockTimer`를 0으로 리셋하고 새 스윙 자신의 잠금(FR-3.3b+본 항목)이 곧바로 이어받는다 — 즉 "연타 중엔 이 여유시간이 사실상 존재하지 않게" 되는 동작이 별도 분기 없이 자연히 성립함. 공중 공격은 이 잠금이 아예 설정되지 않음.
-- FR-3.5b (지상 공격 조작 잠금은 이동뿐 아니라 점프도 막음) `player.attackState !== "idle" && !player.attackIsAirborne`(FR-3.3b/FR-3.5의 active/recovery 구간) 이거나 `postAttackLockTimer > 0`(FR-3.5a)인 동안은 `groundAttackControlLocked` 플래그가 true가 되어, 좌우 이동 입력뿐 아니라 점프 입력(`justPressed["KeyW"]`/`"Space"`)도 무시된다 — 최초 구현 시 이동만 막고 점프는 그대로 통과되던 버그가 있었음(사용자 피드백으로 발견). 이동/점프 두 입력이 하나의 플래그를 공유하므로 항상 같은 기준으로 함께 막히거나 풀린다. 공중 공격은 `attackIsAirborne`이 true라 이 플래그가 항상 false — 기존처럼 후딜레이 중에도 점프가 자유로움.
+- FR-3.5b (지상 공격 조작 잠금은 이동뿐 아니라 점프도 막음) `player.attackState !== "idle" && !player.attackIsAirborne`(FR-3.3b/FR-3.5의 active/recovery 구간) 이거나 `postAttackLockTimer > 0`(FR-3.5a)인 동안은 `groundAttackControlLocked` 플래그가 true가 되어, 좌우 이동 입력뿐 아니라 점프 입력(`justPressed["Space"]`)도 무시된다 — 최초 구현 시 이동만 막고 점프는 그대로 통과되던 버그가 있었음(사용자 피드백으로 발견). 이동/점프 두 입력이 하나의 플래그를 공유하므로 항상 같은 기준으로 함께 막히거나 풀린다. 공중 공격은 `attackIsAirborne`이 true라 이 플래그가 항상 false — 기존처럼 후딜레이 중에도 점프가 자유로움.
 - FR-3.6 숏홉(낮은 점프): 공격 입력이 `startAttack()`을 트리거하는 순간 `attackIsAirborne`이 true이면(타이밍 조건 없음, 매번) `player.vy`를 무조건 `-AIR_ATTACK_HOP_FORCE`(420)로 덮어쓴다. `jumpsUsed`를 소모/참조하지 않으므로 이단 점프를 다 쓴 뒤(`jumpsUsed=MAX_JUMPS`)에도 발동. 일반 점프(`JUMP_FORCE`=760, 최고 높이 ~137.5px) 대비 숏홉 최고 높이는 ~42px.
 - FR-3.7 공중 공격 횟수 제한: `player.airAttacksUsed`가 `CONFIG.MAX_AIR_ATTACKS`(1) 이상이면, 공중(`!player.onGround`)에서의 좌클릭은 `attackState==="idle"`이어도 `startAttack()` 자체가 호출되지 않음(스윙/판정/숏홉 전부 없음 - 점프 횟수를 다 쓰고 점프 입력을 누르는 것과 동일 취급). 지상 공격은 이 제한과 무관하게 항상 가능. `airAttacksUsed`는 공중 공격이 발동할 때마다 1 증가하고, `jumpsUsed`와 동일한 착지 판정 지점(고정형/원웨이 플랫폼 착지, 리스폰) 각각에서 0으로 리셋됨. 결과적으로 한 번 착지한 뒤 낼 수 있는 최대 상승 횟수는 점프(`MAX_JUMPS`=2) + 공중 공격(`MAX_AIR_ATTACKS`=1) = 3회(FR-3.6의 "사실상 3단 점프")로 고정되며, 착지 없이는 그 이상 불가능.
 
@@ -149,7 +150,7 @@
 - FR-13.6 눈(방향 표시): 그 프레임에 실제로 이동한 방향을 가리킴.
 
 ### FR-14. 입력
-- FR-14.1 이동: `KeyA`/`KeyD` (연속 입력). 점프: `KeyW` 또는 `Space` (단발). 공격: 마우스 좌클릭(`Mouse0`, 단발). 표류: 마우스 우클릭(`Mouse2`, 단발).
+- FR-14.1 이동: `KeyA`/`KeyD` (연속 입력). 점프: `Space` (단발). 공격: 마우스 좌클릭(`Mouse0` - 지상은 연속 입력으로 자동 연타, 공중은 단발). 표류: 마우스 우클릭(`Mouse2`, 단발).
 - FR-14.2 마우스 우클릭 시 브라우저 기본 컨텍스트 메뉴 표시 안 함.
 - FR-14.3 `WATCHED_KEYS`(`KeyA/KeyD/KeyW/Space`)는 브라우저 기본 동작(스크롤 등) 방지를 위해 `preventDefault` 처리.
 
