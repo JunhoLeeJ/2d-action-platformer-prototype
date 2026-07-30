@@ -100,7 +100,7 @@ function loadZone(zoneId, spawnAt) {
   currentZone = {
     ...def,
     solidPlatforms: [...buildGroundSegments(def), ...def.solidPlatforms],
-    cameraBounds: { minX: 0, maxX: def.width - W },
+    cameraBounds: { minX: 0, maxX: def.width - W, minY: 0, maxY: def.height - H },
     triggerZones,
   };
 

@@ -12,6 +12,7 @@
     floor: 1,
 
     width: 1600,
+    height: 810, // 화면 높이(H)와 동일 = 세로 스크롤 없는 존 (세로로 긴 구간은 f1z2_platforms 참고)
     groundY, groundH,
     groundGaps: [], // 튜토리얼 - 낙사 구간 없음
 

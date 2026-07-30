@@ -271,8 +271,10 @@ function updatePlayer(dt) {
     }
   }
 
-  // 낙사 판정: 바닥 구멍으로 떨어져 화면 아래로 일정 거리 이상 벗어나면 사망
-  if (player.y > H + CONFIG.PIT_FALL_BUFFER) {
+  // 낙사 판정: 바닥 구멍으로 떨어져 존 아래로 일정 거리 이상 벗어나면 사망. 화면(H) 기준이 아니라
+  // 존의 전체 세로 크기(currentZone.height) 기준 - 세로로 긴 존에서는 카메라에 안 보이는 곳까지도
+  // 정상적으로 서 있을 수 있으므로, 화면 밖으로 나갔다고 곧바로 죽으면 안 된다.
+  if (player.y > currentZone.height + CONFIG.PIT_FALL_BUFFER) {
     triggerDeath();
   }
 }

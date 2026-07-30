@@ -9,8 +9,8 @@
 ## 2. 시스템 개요
 
 - **구성**: `index.html`(마크업 + 인라인 `<style>` + `<canvas>`)이 `js/` 아래 클래식 `<script src>` 파일들을 순서대로 불러오는 구조. 빌드 도구/번들러/외부 라이브러리 없음 - `file://`로 직접 열어도 그대로 동작해야 해서 ES 모듈도 쓰지 않음(파일 구성/로드 순서는 `CLAUDE.md` "File layout" 참고).
-- **월드 구조**: 더 이상 하나로 이어진 연속 월드가 아니라 "존(zone)" 단위 그래프(`js/engine/zones.js`의 `ZONES`). 아래 FR들의 수치(월드 폭/낙사 구멍/봉쇄 벽 등)는 현재 유일하게 구현된 존(`f2z3_legacy_arena`) 기준이며, 그 존 하나로 게임 전체가 시작·진행된다. 존 전환/체크포인트/트리거-컷신 시스템 자체는 구현되어 있지만 아직 그 시스템을 쓰는 두 번째 존이나 스토리 콘텐츠는 없음(순수 기반 작업 단계).
-- **렌더링**: Canvas 2D API. 1440×540 고정 해상도(`<canvas>` 태그의 `width`/`height` 속성이 곧 `W`/`H`), `image-rendering: pixelated`. 가로가 원래(960)보다 넓은 이유는 FR-9.5a 참고 - 몬스터의 감지 범위 기준값은 이 확장 이전의 960×540에 고정돼 있어, 넓어진 화면 덕분에 아직 감지되지 않은 몬스터도 미리 볼 수 있다.
+- **월드 구조**: 더 이상 하나로 이어진 연속 월드가 아니라 "존(zone)" 단위 그래프(`js/engine/zones.js`의 `ZONES`). 현재 등록된 존은 3개: `f1z1_entry`(부팅 시작 지점, 1층 구역 1 - 이동/점프 튜토리얼), `f1z2_platforms`(1층 구역 2 - 플랫폼 연습, 세로로 긴 보너스 타워 포함), `f2z3_legacy_arena`(원래 프로토타입의 전투 레벨 - 나중에 2층 구역 3으로 재활용 예정이며 아직 어디서도 문으로 연결되어 있지 않음). 아래 FR 중 특정 존 전용 수치는 해당 존 이름을 명시.
+- **렌더링**: Canvas 2D API. 1440×810 고정 해상도(`<canvas>` 태그의 `width`/`height` 속성이 곧 `W`/`H`), `image-rendering: pixelated`. 가로가 원래(960)보다 넓은 이유는 FR-9.5a 참고. 존마다 `height`(세로 전체 크기)가 다를 수 있어 `H`보다 큰 존에서는 카메라가 세로로도 스크롤됨(FR-2 참고) - `f1z1_entry`/`f2z3_legacy_arena`는 `height=810`(세로 스크롤 없음), `f1z2_platforms`만 `height=1800`.
 - **루프**: `requestAnimationFrame` 기반. 프레임마다 `dt`(초 단위 경과시간, 0.033초로 클램프)를 계산해 물리/로직에 사용 (프레임레이트 무관 동작).
 - **좌표계**: 월드 좌표(픽셀) 기준으로 모든 오브젝트 위치를 관리하고, 렌더링 시 카메라 오프셋만큼 캔버스를 `translate`해서 화면에 투영. HUD는 DOM 오버레이라 카메라와 무관.
 - **영속성**: 없음. 새로고침 시 모든 상태 초기화.
@@ -41,9 +41,9 @@
 - FR-1.6 월드 경계: `player.x`는 `[0, WORLD_WIDTH - player.w]`로 클램프 (WORLD_WIDTH=3840).
 
 ### FR-2. 카메라
-- FR-2.1 화면 정중앙 기준 가로 데드존(`CAMERA_DEADZONE_W`=160px) 안에서는 플레이어가 움직여도 카메라 고정.
-- FR-2.2 데드존을 벗어나면 지수 감쇠(`1-e^(-CAMERA_SMOOTHING·dt)`, 계수 6)로 목표 위치를 부드럽게 추적. 프레임레이트 무관.
-- FR-2.3 카메라 X는 `[0, currentZone.width - 화면폭]`으로 클램프(존마다 독립된 폭). 세로 스크롤 없음(`camera.y`는 항상 0). 컷신 카메라 홀드 중(`cameraOverrideTarget` ≠ null)에는 데드존 없이 목표 지점으로 그대로 감쇠 추적.
+- FR-2.1 화면 정중앙 기준 가로/세로 데드존(`CAMERA_DEADZONE_W`=160px, `CAMERA_DEADZONE_H`=140px) 안에서는 플레이어가 움직여도 카메라 고정 - 두 축이 서로 독립적으로 판정됨.
+- FR-2.2 데드존을 벗어나면 지수 감쇠(`1-e^(-CAMERA_SMOOTHING·dt)`, 계수 6)로 목표 위치를 부드럽게 추적. 프레임레이트 무관. 가로/세로 동일한 계수 공유.
+- FR-2.3 카메라 X/Y는 각각 `[0, currentZone.width - 화면폭]` / `[0, currentZone.height - 화면높이]`로 클램프(존마다 독립된 크기). `height`가 `H`와 같은 존(현재 `f1z1_entry`/`f2z3_legacy_arena`)은 사실상 세로 스크롤이 없고, `height > H`인 존(`f1z2_platforms`)에서만 세로 스크롤이 실제로 일어남. 컷신 카메라 홀드 중(`cameraOverrideTarget` ≠ null)에는 데드존 없이 목표 지점으로 그대로 감쇠 추적 - target의 x/y는 각각 생략 가능(생략한 축은 현재 카메라 위치 유지).
 
 ### FR-3. 근접 공격
 - FR-3.1 좌클릭(`justPressed["Mouse0"]`) 시, 공격 상태가 `idle`이면 `active`로 전환. 이 시점의 `player.onGround`로 `attackIsAirborne`이 고정되어, 스윙 도중 착지/이륙해도 종류가 안 바뀜(`startAttack`).
@@ -103,7 +103,7 @@
 - FR-9.4 일부 개체(`stunnable=false`)는 근접 공격을 맞아도 발사 타이머가 초기화되지 않음(스턴 면역).
 - FR-9.5 화면에 한 번도 보인 적 없는 개체(`hasBeenVisible=false`)는 완전 대기 상태(AI 자체가 안 돎) — 카메라에 처음 들어오는 순간부터 매 프레임 `updateTurretAI` 호출 시작.
 - FR-9.5a 감지/어그로/공격 범위(모든 몬스터 공통 개념 - FR-10.3/10.4 체이서와 동일 구조를 공유): `hasBeenVisible`이 true여도 `enemy.aggro`가 true가 되기 전까진 예고/발사를 전혀 안 함(완전 대기 - 향후 유휴 애니메이션이 들어갈 자리). 플레이어와의 거리(가로/세로 각각)가 `enemy.detectionRangeW/H` 이내면 `aggro=true`로 전환, 이미 `aggro`인 상태에서 `enemy.leashRangeW/H`를 벗어나면 `aggro=false`로 되돌아가며 `fireTimer`/`telegraphing`도 리셋됨. `aggro`이고 `enemy.attackRangeW/H` 이내일 때만 `fireTimer`가 실제로 줄어들고 발사됨.
-  - 포탑/저격수의 `detectionRangeW/H`는 `ENEMY_DEFAULT_DETECTION_RANGE_W/H`(480/270, 원래 960×540 화면의 절반값 - FR-1의 렌더링 해상도 참고)로 세팅됨. 이 기본값은 실제 캔버스 `W`/`H`(1440×540)와 무관하게 고정되어 있어, 넓어진 카메라 뷰 안에서 아직 감지 범위 밖인 몬스터를 플레이어가 미리 볼 수 있음.
+  - 포탑/저격수의 `detectionRangeW/H`는 `ENEMY_DEFAULT_DETECTION_RANGE_W/H`(480/270, 원래 960×540 화면의 절반값 - FR-1의 렌더링 해상도 참고)로 세팅됨. 이 기본값은 실제 캔버스 `W`/`H`(현재 1440×810)와 무관하게 고정되어 있어, 넓어진 카메라 뷰 안에서 아직 감지 범위 밖인 몬스터를 플레이어가 미리 볼 수 있음.
   - 포탑/저격수의 `leashRangeW/H`/`attackRangeW/H`는 `Infinity` — 체이서(FR-10.4, 유한한 `CHASER_LEASH_RANGE`라서 멀어지면 어그로가 풀림)와 달리, 최초 감지(`detectionRange` 진입) 이후로는 거리와 무관하게 `aggro`가 절대 `false`로 되돌아가지 않고 공격 범위 제한도 없음("무한 어그로"). 유한 범위(숫자)와 무한 어그로(`Infinity`)는 같은 필드에 다른 값만 넣으면 되는 구조라, 새 몬스터도 둘 중 하나를 그대로 골라 쓸 수 있음.
 - FR-9.6 저격수(`type="sniper"`) 변종: FR-9.1~FR-9.5을 값 그대로 전부 공유(체력/발사 주기/예고 시간 동일, `updateTurretAI`를 그대로 재사용). 유일한 차이는 발사하는 투사체에 `unblockable: true`가 붙는다는 것과 그 투사체의 반경이 `SNIPER_PROJECTILE_RADIUS`(15, 일반 `PROJECTILE_RADIUS`=8보다 큼)라는 것.
   - `unblockable` 투사체는 FR-4(피격 유예)/FR-5(표류)를 전혀 타지 않음 — 명중 시 `damagePlayer()`(유예 큐에 push) 대신 `applyDamageToHp()`를 직접 호출해 즉시 HP를 깎음(`invincibleTimer`는 그대로 존중).
@@ -186,7 +186,7 @@ chaser: `patrolMinX,patrolMaxX,facing,aiState,attackTimer,stunTimer,perceptionTi
 | 적 공통 범위(포탑/저격수 기본값) | ENEMY_DEFAULT_DETECTION_RANGE_W/H (감지만 유한, leash/attackRange는 Infinity=무한 어그로) | 480/270 |
 | 포탑 | TURRET_FIRE_INTERVAL / TURRET_TELEGRAPH_DURATION / TURRET_MAX_HP / PROJECTILE_SPEED/RADIUS/DAMAGE | 2.2 / 0.5 / 5 / 260 / 8 / 1 |
 | 저격수 | (FR-9.1~9.5 값 전부 포탑과 공유) / SNIPER_PROJECTILE_RADIUS | - / 15 |
-| 카메라 | CAMERA_SMOOTHING / CAMERA_DEADZONE_W | 6 / 160 |
+| 카메라 | CAMERA_SMOOTHING / CAMERA_DEADZONE_W / CAMERA_DEADZONE_H | 6 / 160 / 140 |
 | 체이서 | CHASER_MAX_HP / PATROL_SPEED / CHASE_SPEED | 3 / 90 / 260 |
 | 체이서 범위 | DETECTION_RANGE / DETECTION_VERTICAL_RANGE / LEASH_RANGE / ATTACK_RANGE_W/H | 480 / 130 / 650 / 130/130 |
 | 체이서 타이밍 | ATTACK_TELEGRAPH_DURATION / ATTACK_RECOVERY_DURATION / ATTACK_DAMAGE / STUN_DURATION / PERCEPTION_INTERVAL | 0.65 / 0.6 / 2 / 0.5 / 0.1 |

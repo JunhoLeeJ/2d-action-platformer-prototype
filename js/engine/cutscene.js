@@ -10,7 +10,8 @@
 
    이벤트 타입:
      dialogue({speaker, text})       - 텍스트박스 표시, 클릭/키 입력으로 다음으로
-     cameraHold({target:{x}, duration}) - 카메라를 target으로 감쇠 추적(데드존 없음), duration 후 자동 진행
+     cameraHold({target:{x,y}, duration}) - 카메라를 target으로 감쇠 추적(데드존 없음), x/y 둘 다 선택 사항(생략한
+                                       축은 유지). duration 후 자동 진행
      animation({entityRef, anim, duration}) - entity.cutsceneAnim 세팅 (실제 렌더링은 아직 없음 - 훅만)
      fade({color, outDuration, holdDuration, inDuration, onMidpoint}) - 암전/화이트아웃, 완전히 어두운
                                        순간(onMidpoint)에 배경/위치를 바꿔치기할 수 있음
@@ -88,7 +89,11 @@ function runEvent(ev) {
       activeSequence.awaitingInput = true;
       break;
     case "cameraHold":
-      cameraOverrideTarget = { x: ev.target.x };
+      // target.x/target.y 둘 다 선택 사항 - 생략한 축은 지금 카메라 위치를 그대로 유지(그 축만 안 움직임)
+      cameraOverrideTarget = {
+        x: ev.target.x !== undefined ? ev.target.x : camera.x,
+        y: ev.target.y !== undefined ? ev.target.y : camera.y,
+      };
       activeSequence.eventTimer = ev.duration;
       break;
     case "animation":

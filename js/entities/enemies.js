@@ -291,7 +291,7 @@ function updateProjectiles(dt) {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
 
-    if (p.x < -50 || p.x > currentZone.width + 50 || p.y < -50 || p.y > H + 50) {
+    if (p.x < -50 || p.x > currentZone.width + 50 || p.y < -50 || p.y > currentZone.height + 50) {
       projectiles.splice(i, 1);
       continue;
     }
