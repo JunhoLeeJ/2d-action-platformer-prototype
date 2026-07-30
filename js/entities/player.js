@@ -114,25 +114,20 @@ function getAttackHitbox() {
   return { x, y, w, h };
 }
 
-// 문(door)을 통해 존을 넘는 도중 스윙/표류가 진행 중이었다면, 페이드 뒤 새 존 지형을 기준으로
-// 그 판정이 어긋난 채 이어지지 않도록 초기화한다 (zones.js의 makeDoorTrigger onMidpoint에서 호출).
-function cancelInFlightCombatState() {
-  player.attackState = "idle";
-  if (player.state === "drift") {
-    player.state = "anchor";
-    player.driftTimer = 0;
-    player.pendingDamage.length = 0;
-  }
-}
-
-// 죽음 → 리스폰: 위치/존 전환은 loadZone(체크포인트 존, 체크포인트 좌표)에 위임하고, 여기서는
-// "생존 상태"(HP/공격/표류/무적)만 초기값으로 되돌린다. 문 전환은 loadZone만 부르고 이 생존 상태
-// 리셋은 하지 않는다 - 그래야 문을 넘을 때 HP/쿨다운이 그대로 유지된다.
-function respawnPlayer() {
-  loadZone(currentCheckpoint.zoneId, currentCheckpoint);
-
+// "생존 상태"(HP/공격/표류/무적/속도)를 전부 초기값으로 되돌리는 공용 리셋 - 죽어서 리스폰할 때
+// (respawnPlayer)와 존을 정식으로 새로 시작할 때(zones.js의 enterZone - 문 전환/QA 패널 워프 공용)
+// 둘 다 이 함수 하나를 공유한다. 예전엔 문 전환이 이 리셋을 아예 안 거쳐서 HP/쿨다운이 그대로
+// 유지됐지만, 사용자 요청으로 "존을 넘어갈 때는 항상 풀피로 시작"하게 바뀌면서 문 전환도 이제
+// enterZone을 거쳐 이 함수를 타게 됐다(그래서 이 함수 이름에서 "respawn" 대신 "vitals"를 씀 - 더 이상
+// 죽음 전용이 아니기 때문). 위치(x/y)는 이 함수의 책임이 아니다 - 호출자가 loadZone으로 이미 옮겨
+//놓은 뒤에 불러야 하고, entryPoint/checkpoint는 항상 실제로 서 있을 수 있는 지점이라는 전제
+// (CLAUDE.md의 standingTopY 관례) 하에 onGround/jumpsUsed도 여기서 같이 "착지된 상태"로 맞춰준다 -
+// 안 그러면 위치는 바닥에 닿아 있어도 onGround 플래그 자체는 다음 물리 프레임이 스스로 충돌을
+// 검사해서 되돌려놓기 전까지 잠깐 false로 남아있는 여지가 생긴다.
+function resetPlayerVitals() {
   player.vx = 0;
   player.vy = 0;
+  player.onGround = true;
   player.hp = CONFIG.PLAYER_MAX_HP;
   player.timeSinceHit = Infinity;
   player.jumpsUsed = 0;
@@ -147,6 +142,13 @@ function respawnPlayer() {
   player.pendingDamage.length = 0;
   player.driftTrail.length = 0;
   player.driftBurst = null;
+}
+
+// 죽음 → 리스폰: 위치/존 전환은 loadZone(체크포인트 존, 체크포인트 좌표)에 위임하고, 생존 상태는
+// resetPlayerVitals()가 담당한다.
+function respawnPlayer() {
+  loadZone(currentCheckpoint.zoneId, currentCheckpoint);
+  resetPlayerVitals();
   gameState = "playing";
 }
 
@@ -176,7 +178,7 @@ function resolveSolidVerticalCollisions() {
 function updatePlayer(dt) {
   // --- 타이머 ---
   if (player.invincibleTimer > 0) player.invincibleTimer -= dt;
-  tickHpRegen(player, dt);
+  tickHpRegen(player, dt, "playerHpRegenDelay");
   if (player.postAttackLockTimer > 0) player.postAttackLockTimer -= dt;
 
   // 지상 공격으로 인한 조작 잠금(이동 + 점프 전부) - 스윙의 active/recovery 상태이거나(공중 공격은

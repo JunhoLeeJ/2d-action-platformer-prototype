@@ -70,10 +70,10 @@
     },
 
     triggerZones: [],
-    // hpRegenDelay는 일부러 안 넣음 - 무피격 시간 경과 후 즉시 풀피로 회복되는 그 기믹은 1층 구역
-    // 3(근접 공격 연습, `f1z3_melee_practice`)에서만 나오는 연습용 장치라는 게 사용자 확인 사항이라,
-    // 구역 4에는 켜면 안 됨(hpFloor만 유지 - "1층에서는 구역 5 제외 안 죽는다"는 층 전체 규칙은
-    // 별개로 계속 지킴, CLAUDE.md/ROADMAP.md 참고 - hpFloor와 hpRegenDelay는 독립된 레버).
-    ruleFlags: { hideGhostNpc: true, hpFloor: 1 },
+    // playerHpRegenDelay만 켜고 enemyHpRegenDelay는 일부러 안 넣음(사용자 확인) - 몬스터(mimeA)는
+    // 무피격 시간이 지나도 회복하면 안 되지만("체력 차는 기믹은 구역 3 전용"), 플레이어는 이 구역도
+    // 1층이라 회복이 있어야 함(hpFloor=1과 짝을 이뤄 "죽지는 않고 버티면 회복됨"). 두 플래그가
+    // 독립적으로 분리되어 있어서(RULE_FLAG_DEFAULTS, js/engine/zones.js) 이렇게 한쪽만 켜는 게 가능함.
+    ruleFlags: { hideGhostNpc: true, hpFloor: 1, playerHpRegenDelay: CONFIG.HP_REGEN_DELAY },
   };
 })();

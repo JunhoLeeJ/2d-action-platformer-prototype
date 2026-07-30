@@ -15,10 +15,14 @@ const RULE_FLAG_DEFAULTS = {
   disableDrift: false,
   playerInvincible: false, // true면 damagePlayer()가 아예 등록을 안 함(피격 유예 화면 효과도 안 뜸)
   hpFloor: null,            // 숫자를 넣으면 applyDamageToHp가 HP를 그 이하로 못 내림 (죽지 않는 구간용)
-  // 숫자를 넣으면 이 존 안의 플레이어 + 모든 몬스터가 마지막 피격 후 이 시간(sec)만큼 안 맞으면
-  // 즉시(스냅) 최대 체력으로 회복된다 (tickHpRegen, enemies.js) - hpFloor와는 독립된 별개의 레버라,
-  // "안 죽는다"와 "회복된다"를 존마다 따로 켜고 끌 수 있다. null이면 완전히 비활성.
-  hpRegenDelay: null,
+  // 숫자를 넣으면 마지막 피격 후 이 시간(sec)만큼 안 맞으면 즉시(스냅) 최대 체력으로 회복된다
+  // (tickHpRegen, enemies.js) - hpFloor와는 독립된 별개의 레버라, "안 죽는다"와 "회복된다"를 존마다
+  // 따로 켜고 끌 수 있다. null이면 완전히 비활성. 플레이어용/몬스터용이 서로 독립된 별개의 플래그다 -
+  // 예전엔 hpRegenDelay 하나로 플레이어+몬스터가 같이 묶여 있었는데, "1층 구역 4는 몬스터는 회복
+  // 안 하지만 플레이어는 회복해야 한다"는 요구사항 때문에 분리함(사용자 확인) - 둘 다 켜고 싶으면
+  // (구역 3처럼) 그냥 둘 다 값을 넣으면 됨. 이후 난이도 시스템에서도 이 둘을 독립적으로 조절할 예정.
+  playerHpRegenDelay: null,
+  enemyHpRegenDelay: null,
   hideGhostNpc: false,      // 1층은 동료 없이 혼자라는 설정이라(원작 스펙 "npc는 1층에서는 존재하지 않음") 유령 동료도 숨김
 };
 function getRuleFlag(name) {
@@ -150,12 +154,13 @@ function makeDoorTrigger(door) {
     outDuration: 0.4,
     holdDuration: 0.15,
     inDuration: 0.4,
+    // enterZone()이 위치 이동+체크포인트 갱신+생존 상태(HP 등) 리셋을 전부 처리한다 - QA 패널 워프와
+    // 완전히 동일한 코드 경로(사용자 요청, § 위 enterZone 주석 참고). 이 리셋 안에 attackState/표류
+    // 초기화가 이미 포함되어 있어서, 문을 넘는 도중 스윙/표류가 걸려있었어도 새 존 지형 기준으로
+    // 어긋난 채 이어질 걱정이 없다 - 예전엔 이걸 위해 cancelInFlightCombatState()를 따로 불렀지만
+    // 이제 resetPlayerVitals()가 더 넓게 포괄하므로 그 함수 자체가 필요 없어짐.
     onMidpoint: () => {
-      // 문을 넘는 도중 스윙/표류가 걸려있었다면, 페이드가 끝나고 새 존의 지형을 기준으로
-      // 그 판정이 어긋난 채 이어지지 않도록 여기서 확실히 정리한다.
-      cancelInFlightCombatState();
-      const target = ZONES[door.targetZoneId];
-      loadZone(door.targetZoneId, target.entryPoint);
+      enterZone(door.targetZoneId);
     },
   };
   return {
@@ -181,7 +186,9 @@ function makeDoorTrigger(door) {
 
 // zoneId로 등록된 존을 불러와 currentZone/enemies/projectiles/플레이어 위치/카메라를 전부 그 존
 // 기준으로 다시 세팅한다. 체크포인트 리스폰과 문 전환 둘 다 이 함수 하나로 처리된다(§ 체크포인트 참고) -
-// 이 함수는 위치만 옮길 뿐 HP/공격/표류 같은 "생존 상태"는 절대 건드리지 않는다(그건 respawnPlayer의 몫).
+// 이 함수 자체는 위치만 옮길 뿐 HP/공격/표류 같은 "생존 상태"는 건드리지 않는다 - 그건 호출자의 몫이다
+// (죽어서 리스폰하는 경우는 respawnPlayer가, 문 전환/QA 패널 워프처럼 "새로 시작"하는 경우는 아래
+// enterZone이 이어서 처리한다).
 function loadZone(zoneId, spawnAt) {
   const def = ZONES[zoneId];
 
@@ -224,4 +231,29 @@ function loadZone(zoneId, spawnAt) {
   snapCameraToPlayer();
 
   checkAutoTrigger(zoneId);
+}
+
+// "정식으로 새 존에서 시작"하는 두 경로(문 전환, QA 패널/메인 메뉴의 워프)가 완전히 똑같은 코드를
+// 타도록 만든 공용 진입점 - 사용자가 명시적으로 요청한 사항("문 넘는 거랑 구역 선택이랑 정확히 똑같은
+// 코드로 처리됐으면 좋겠다"). loadZone()으로 위치를 옮기고, 그 존의 entryPoint를 새 체크포인트로
+// 활성화하고(activateCheckpoint), resetPlayerVitals()(js/entities/player.js)로 HP를 포함한 생존
+// 상태를 전부 초기화한다 - 이 세 가지가 이제 문 전환/워프 어느 쪽에서 들어와도 동일하게 적용되므로,
+// "문으로 넘으면 체력이 안 차거나 리스폰 위치가 이상해진다"류의 두 경로 간 불일치가 구조적으로
+// 불가능해진다. 죽어서 리스폰하는 경우(respawnPlayer)는 일부러 이 함수를 안 쓴다 - 그쪽은 항상
+// entryPoint가 아니라 currentCheckpoint(반드시 entryPoint와 같으란 법 없음 - 존 중간의 체크포인트일
+// 수도 있음)로 돌아가야 하기 때문.
+//
+// 컷신 강제종료(activeSequence 등)는 일부러 이 함수에 안 넣는다 - 문 전환은 이미 "페이드 시퀀스 안"에서
+// 안전하게 호출되므로 그 시퀀스 자신의 activeSequence를 여기서 건드리면 그 시퀀스 자체가 끊겨서
+// 크래시가 난다(진행 중인 fade의 updateSequence가 그 다음 줄에서 activeSequence를 계속 참조함).
+// 반대로 QA 패널 워프는 임의의 시점에 끼어드는 것이라 그 강제종료가 반드시 필요한데, 그건 호출자인
+// qapanel.js의 warpToZone()이 이 함수를 부르기 전에 직접 처리한다.
+function enterZone(zoneId) {
+  const def = ZONES[zoneId];
+  loadZone(zoneId, def.entryPoint);
+
+  const firstCheckpoint = def.checkpoints[0];
+  activateCheckpoint(zoneId, def.entryPoint.x, def.entryPoint.y, firstCheckpoint && firstCheckpoint.id);
+
+  resetPlayerVitals();
 }

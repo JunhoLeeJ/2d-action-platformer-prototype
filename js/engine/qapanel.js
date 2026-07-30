@@ -30,14 +30,14 @@ let qaPanelOpen = false;
 const qaPanelEl = document.getElementById("qaPanel");
 const qaPanelListEl = document.getElementById("qaPanelList");
 
-// 워프는 문/체크포인트를 거치지 않는 임의 이동이라, loadZone()이 옮겨주지 않는 것들을 전부 여기서
-// 직접 정리해야 한다: 진행 중이던 컷신(텍스트박스/카메라 홀드/페이드)과 타임스톱, 그리고 "그 지점에서
-// 새로 시작"이라는 워프의 의미에 맞는 생존 상태(HP/쿨다운) 리셋 - respawnPlayer(js/entities/player.js)와
-// 거의 같은 리셋 블록을 쓰되, 죽어서 오는 게 아니라 언제든(컷신 도중 포함) 호출될 수 있어 컷신 강제
-// 종료 처리가 추가로 필요하다.
+// 워프는 문/체크포인트를 거치지 않는 임의 이동이라, 실제 존 전환(위치+체크포인트+생존 상태 리셋)
+// 자체는 zones.js의 enterZone()에 위임하고 - 문 전환도 이제 같은 함수를 쓴다(사용자 요청: "문 넘는
+// 거랑 구역 선택이랑 정확히 똑같은 코드로 처리됐으면 좋겠다") - 이 함수는 그 위에 "임의의 시점에
+// 끼어드는 워프"이기 때문에 추가로 필요한 것만 처리한다: 진행 중이던 컷신/타임스톱 강제 정리.
+// 문 전환은 이미 "페이드 시퀀스 안"이라는 안전한 시점에서만 enterZone을 부르므로 이 정리가 필요
+// 없지만, 워프는 컷신 도중이든 아무 때든 호출될 수 있어 이 강제 정리가 반드시 있어야 한다.
 function warpToZone(zoneId) {
-  const def = ZONES[zoneId];
-  if (!def) return;
+  if (!ZONES[zoneId]) return;
 
   // 진행 중이던 시퀀스를 강제 중단 - endSequence()가 정상 종료 시 하는 정리(카메라 오버라이드 해제,
   // 텍스트박스 숨김, 대기 중이던 auto 트리거 폐기)를 그대로 반복한다. endSequence() 자체를 호출하지
@@ -56,36 +56,15 @@ function warpToZone(zoneId) {
   timeStopOnComplete = null;
 
   gameState = "playing";
-  loadZone(zoneId, def.entryPoint);
+  enterZone(zoneId);
 
-  // 워프한 존을 새 리스폰 지점으로 삼는다 - 안 그러면 워프 직후 죽었을 때 엉뚱한(이전) 존의
-  // 체크포인트로 되돌아가버려서 워프 자체가 무의미해진다.
-  const firstCheckpoint = def.checkpoints[0];
-  activateCheckpoint(zoneId, def.entryPoint.x, def.entryPoint.y, firstCheckpoint && firstCheckpoint.id);
-
-  // respawnPlayer와 동일하게 "생존 상태"를 전부 초기값으로 되돌린다 - 워프는 그 지점에서 새로
-  // 시작하는 개념이라, 이전 존에서 깎여있던 체력/쿨다운을 그대로 들고 오면 워프 직후 불합리하게
-  // 죽거나 표류를 못 쓰는 등 이 기능의 목적(자유로운 탐색)에 어긋난다.
-  player.vx = 0;
-  player.vy = 0;
-  player.hp = CONFIG.PLAYER_MAX_HP;
-  player.timeSinceHit = Infinity;
-  player.jumpsUsed = 0;
-  player.airAttacksUsed = 0;
-  // respawnPlayer처럼 짧은 무적시간을 줘서(0으로 두지 않음) - 워프해서 도착한 자리가 하필 적 근접
-  // 사거리 안(예: 몬스터가 스폰 지점 바로 옆에 있는 존)이어도 화면을 파악할 틈도 없이 바로 얻어맞는
-  // 일이 없게 한다. 0으로 두면 몬스터가 붐비는 존으로 워프하는 순간 아무런 유예 없이 즉시 피격될
-  // 수 있어서(실제로 겪은 문제) respawnPlayer와 동일한 값으로 맞춤.
-  player.invincibleTimer = CONFIG.HIT_INVINCIBILITY_DURATION * 0.5;
-  player.attackState = "idle";
-  player.postAttackLockTimer = 0;
-  player.state = "anchor";
-  player.driftTimer = 0;
-  player.driftCooldownTimer = 0;
-  player.driftCooldownDuration = getDriftCooldownOnWhiff();
-  player.pendingDamage.length = 0;
-  player.driftTrail.length = 0;
-  player.driftBurst = null;
+  // 사용자가 "게임을 맨 처음 켰을 때만" 가끔 낙사한다고 제보한 것에 대한 방어적 조치 - 원인을 코드
+  // 레벨에서 특정하지 못했음(자동화 테스트로 광범위하게 재현 시도했으나 실패) - 대신 사용자가 직접
+  // 제안한 완화책(스폰을 아주 살짝 위에서 시작)을 정확히 이 "최초 부트스트랩" 한 순간에만 적용한다.
+  // !gameStarted 시점에만 걸리므로(ensureLoopStarted가 곧 true로 뒤집음) 문 전환/이후의 모든 워프/
+  // 리스폰에는 전혀 영향이 없다 - entryPoint 자체를 건드리면(모든 진입에 다 적용되어) "존에 막 들어가면
+  // 잠깐 공중에 떠 보인다"는 예전에 고쳤던 버그가 되살아나므로 반드시 이 한 경로로만 좁혀야 한다.
+  if (!gameStarted) player.y -= 2;
 
   // 아직 메인 메뉴 단계라 루프가 한 번도 안 돈 상태였다면(js/main.js) 여기서 처음 시작시킨다 -
   // 이미 돌고 있으면 아무 일도 안 함(중복 시작 방지 - ensureLoopStarted 자체가 멱등).
@@ -97,8 +76,13 @@ function warpToZone(zoneId) {
 function pickZone(id) {
   warpToZone(id);
   closeQaPanel();
-  hideMainMenu(); // 메인 메뉴(mainmenu.js) 단계에서 이 패널로 바로 구역을 고른 경우 메뉴도 같이 치움 -
-  // 게임 중 백틱으로 연 경우엔 메뉴가 이미 숨겨져 있어 아무 효과 없음(멱등).
+  // 이 패널을 열었던 배경 화면이 뭐였든(메인 메뉴 또는 일시정지 메뉴) 실제로 구역을 골랐으면 그
+  // 화면도 같이 치운다 - 안 그러면 워프는 성공했는데 화면은 계속 그 배경 화면에 멈춰 보인다(둘 중
+  // 관련 없는 쪽 호출은 이미 닫혀있어 아무 효과 없이 멱등하게 넘어감). "패널만 닫고 아무 것도 안
+  // 고르면 배경 화면으로 돌아온 것처럼 보인다"는 트릭(mainmenu.js/pausemenu.js 참고)은 어디까지나
+  // "안 골랐을 때"의 얘기고, 실제로 골랐으면 워프가 이겨야 한다.
+  hideMainMenu();
+  closePauseMenu();
 }
 
 // 키보드 탐색(W/S)이 지금 가리키고 있는 항목의 인덱스 - qaPanelZoneIds와 같은 순서로 매칭된다.

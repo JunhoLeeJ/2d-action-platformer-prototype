@@ -2,13 +2,15 @@
 
 // 1층 구역 3 - 근접 공격 연습(포탑 1 + 체이서 1). 1층 전체 예외 규칙 중 "죽으면 안 됨"이 처음으로
 // 실제 시험대에 오르는 구역 - 여기서 처음 등장하는 두 메커니즘:
-//   1) 무피격 시간 경과 후 즉시(스냅) 최대 체력 회복 (ruleFlags.hpRegenDelay, js/entities/enemies.js의
-//      tickHpRegen) - 플레이어와 몬스터 둘 다 이 존 안에서는 동일하게 적용됨: 맞아서 깎이는 건
-//      그대로 보이되, 잠시(CONFIG.HP_REGEN_DELAY초) 안 맞고 버티면 그 순간 바로 풀피로 돌아온다
-//      (서서히 차오르는 연출 아님). hpFloor(§ 아래)와는 독립된 별개의 레버라 - hpRegenDelay가 없는
-//      존(2층 등)에서는 플레이어도 몬스터도 이 회복이 아예 발동하지 않으므로 실제 전투 긴장감엔
-//      영향 없음. 플레이어 HP 최소값(hpFloor=1)과 짝을 이뤄 "죽지는 않지만 계속 깎일 수 있고,
-//      버티면 다시 풀피로 리셋된다"는 연습 구간의 느낌을 만듦.
+//   1) 무피격 시간 경과 후 즉시(스냅) 최대 체력 회복 (ruleFlags.playerHpRegenDelay/enemyHpRegenDelay,
+//      js/entities/enemies.js의 tickHpRegen) - 이 존은 플레이어와 몬스터 둘 다 켜서 동일하게 적용함:
+//      맞아서 깎이는 건 그대로 보이되, 잠시(CONFIG.HP_REGEN_DELAY초) 안 맞고 버티면 그 순간 바로
+//      풀피로 돌아온다(서서히 차오르는 연출 아님). 두 플래그가 독립적인 이유는 구역 4에서 "몬스터는
+//      회복 안 하지만 플레이어는 회복해야 한다"는 반대 케이스가 나와서(사용자 확인) - 이 존은 그냥
+//      둘 다 켠 경우일 뿐, 항상 같이 켜야 하는 건 아님. hpFloor(§ 아래)와도 독립된 별개의 레버라 -
+//      두 regen 플래그가 둘 다 없는 존(2층 등)에서는 이 회복이 아예 발동하지 않으므로 실제 전투
+//      긴장감엔 영향 없음. 플레이어 HP 최소값(hpFloor=1)과 짝을 이뤄 "죽지는 않지만 계속 깎일 수
+//      있고, 버티면 다시 풀피로 리셋된다"는 연습 구간의 느낌을 만듦.
 //   2) 몬스터 쪽 hpFloor(enemy.hpFloor, js/entities/enemies.js의 damageEnemy) - 리스폰 반복 대신
 //      "안 죽되 체력 핍은 거의 바닥까지 보여줌"을 택함(스펙이 둘 다 허용). 포탑/체이서 모두 hpFloor:0.5로
 //      스폰해서, 몇 대 때리면 마지막 반 칸 핍에서 멈추고 더 이상 안 줄어든다 - 계속 때려도 안 죽는다는
@@ -62,6 +64,9 @@
     // 대사는 아직 안 넣음(사용자가 나중에 정확한 문구/타이밍을 직접 지정할 예정) - 컷신 엔진 자체는
     // 그대로 있으니 필요해지면 이 배열에 트리거를 추가하면 됨.
     triggerZones: [],
-    ruleFlags: { hideGhostNpc: true, hpFloor: 1, hpRegenDelay: CONFIG.HP_REGEN_DELAY },
+    ruleFlags: {
+      hideGhostNpc: true, hpFloor: 1,
+      playerHpRegenDelay: CONFIG.HP_REGEN_DELAY, enemyHpRegenDelay: CONFIG.HP_REGEN_DELAY,
+    },
   };
 })();

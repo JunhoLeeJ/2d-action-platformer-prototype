@@ -170,10 +170,16 @@ function damageEnemy(enemy, amount) {
 // 범용 즉시(스냅) 체력 회복 - 플레이어(player.js의 updatePlayer)와 몬스터(아래 updateEnemies) 둘 다
 // 이 함수 하나를 공유한다. entity는 {hp, maxHp, timeSinceHit} 셋만 있으면 되는 최소 인터페이스라,
 // 나중에 회복이 필요한 다른 개체가 생겨도 그대로 재사용 가능. "천천히 차오름"이 아니라 지연시간이
-// 지나는 즉시 풀피로 스냅되는 이유는 의도적 - 회복 여부/시점을 존 규칙(ruleFlags.hpRegenDelay,
-// zones.js) 하나로 켜고 끌 수 있게 해서, 이후 난이도 조절에 이 값만 만지면 되도록 하기 위함.
-function tickHpRegen(entity, dt) {
-  const delay = getRuleFlag("hpRegenDelay");
+// 지나는 즉시 풀피로 스냅되는 이유는 의도적 - 회복 여부/시점을 존 규칙(zones.js) 하나로 켜고 끌 수
+// 있게 해서, 이후 난이도 조절에 이 값만 만지면 되도록 하기 위함.
+//
+// ruleFlagName: 어느 규칙 플래그를 볼지 호출자가 지정 - "playerHpRegenDelay"(플레이어용)와
+// "enemyHpRegenDelay"(몬스터용)로 분리되어 있다(RULE_FLAG_DEFAULTS, zones.js). 원래는
+// 플레이어/몬스터가 하나의 hpRegenDelay 플래그를 같이 봤는데, 1층 구역 4에서 "몬스터는 회복하면
+// 안 되지만 플레이어는 회복해야 한다"는 요구사항이 나와서 독립된 두 레버로 분리함 - 존마다 둘을
+// 따로 켜고 끌 수 있어야 향후 난이도 시스템(하나만 켜기/둘 다 끄기/둘 다 켜기)에도 그대로 대응됨.
+function tickHpRegen(entity, dt, ruleFlagName) {
+  const delay = getRuleFlag(ruleFlagName);
   if (delay == null) return;
   entity.timeSinceHit += dt;
   if (entity.timeSinceHit >= delay && entity.hp < entity.maxHp) {
@@ -339,7 +345,7 @@ function updateEnemies(dt) {
     if (!enemy.alive) continue;
     if (gameState !== "playing") continue;
 
-    tickHpRegen(enemy, dt); // hpRegenDelay가 걸린 존(f1z3 등)에서만 실제로 발동 - 그 외엔 즉시 return
+    tickHpRegen(enemy, dt, "enemyHpRegenDelay"); // enemyHpRegenDelay가 걸린 존(f1z3 등)에서만 실제로 발동 - 그 외엔 즉시 return
 
     // 화면에 한 번이라도 들어온 적이 있는지 기록 (한 번 보이고 나면 이후 화면 밖으로 나가도 계속 유지).
     // 단, 봉쇄 벽 너머의 몬스터는 벽이 잠긴 동안은 화면에 보여도 "안 보인 것"으로 취급.
