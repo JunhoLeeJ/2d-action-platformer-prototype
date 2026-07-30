@@ -62,12 +62,13 @@
      js/engine/checkpoint.js         currentCheckpoint, activateCheckpoint()
      js/engine/cutscene.js           트리거 시퀀스 엔진, 텍스트박스, 페이드
      js/engine/qapanel.js            QA 패널(구역 이동) - qaPanelOpen, warpToZone()
+     js/engine/mainmenu.js           메인 메뉴("게임 시작"/"구역 선택") - 진짜 부트스트랩 진입점
      js/rendering.js                 draw(), updateHud()
      js/levels/*.js                  존 데이터 (ZONES에 등록) - zones.js 다음에 로드되어야 함
      js/main.js                      이 파일 - update()/loop()/부트스트랩, 반드시 맨 마지막에 로드
    ========================================================================= */
 
-const BOOT_ZONE_ID = "f1z1_entry"; // 실제 게임 시작 지점 (1층 구역 1). f2z3_legacy_arena는 2층 구역 3으로 재활용 예정 - 아직 어디서도 연결 안 됨.
+const BOOT_ZONE_ID = "f1z1_entry"; // "게임 시작" 버튼(mainmenu.js)이 여는 실제 게임 시작 지점 (1층 구역 1).
 
 function update(dt) {
   if (gameState === "respawning") {
@@ -134,8 +135,16 @@ function loop(now) {
 }
 
 /* --------------------------- 부트스트랩 --------------------------- */
-const bootZone = ZONES[BOOT_ZONE_ID];
-currentCheckpoint = { zoneId: BOOT_ZONE_ID, x: bootZone.entryPoint.x, y: bootZone.entryPoint.y };
-loadZone(BOOT_ZONE_ID, bootZone.entryPoint);
-
-requestAnimationFrame(loop);
+// 예전엔 여기서 곧바로 BOOT_ZONE_ID를 불러와 루프를 시작했지만, 이제 진짜 시작 지점은 메인
+// 메뉴(js/engine/mainmenu.js)의 "게임 시작"/"구역 선택" 버튼이다 - 그 버튼들이 (직접 또는 QA
+// 패널을 통해) warpToZone()을 호출하고, warpToZone()이 아직 루프가 안 도는 상태면 아래
+// ensureLoopStarted()로 그제서야 루프를 시작시킨다. 그래서 부트스트랩은 그 지연 시작 스위치만
+// 정의해두고 끝 - 사용자가 버튼을 누르기 전까지는 currentZone이 null인 채로 loop() 자체가 한
+// 번도 안 돌아서 canvas엔 아무 것도 안 그려지고, 메인 메뉴 DOM만 보인다.
+let gameStarted = false;
+function ensureLoopStarted() {
+  if (gameStarted) return;
+  gameStarted = true;
+  lastTime = performance.now(); // 메뉴 화면에 머문 시간이 첫 프레임의 dt로 새어들어가지 않게 시작 시점을 다시 잡음
+  requestAnimationFrame(loop);
+}

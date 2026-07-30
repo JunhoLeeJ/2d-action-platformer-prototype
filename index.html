@@ -129,6 +129,53 @@
     pointer-events: none;
     z-index: 5;
   }
+  /* 메인 메뉴(js/engine/mainmenu.js) - 게임의 실제 시작 화면. fadeOverlay(5)보다는 위, QA
+     패널(10)보다는 아래 - "구역 선택" 버튼을 누르면 이 화면 위에 QA 패널이 그대로 겹쳐 뜨고, 패널을
+     선택 없이 닫으면(Esc) 다시 이 메뉴로 자연스럽게 돌아온다(별도의 "뒤로가기" 로직 없이 그냥
+     숨겨지지 않고 계속 떠 있었을 뿐이라 가능한 동작 - mainmenu.js 참고). */
+  #mainMenu {
+    position: absolute;
+    inset: 0;
+    background: #14151a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    z-index: 9;
+  }
+  #mainMenuTitle {
+    font-size: 26px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    margin-bottom: 18px;
+    text-shadow: 1px 1px 3px #000;
+  }
+  .mainMenuBtn {
+    width: 220px;
+    padding: 14px 0;
+    font-size: 16px;
+    font-family: inherit;
+    font-weight: bold;
+    border-radius: 6px;
+    border: 2px solid #555b6e;
+    cursor: pointer;
+  }
+  #mainMenuStartBtn {
+    background: #ffd54f;
+    color: #14151a;
+    border-color: #ffd54f;
+  }
+  #mainMenuStartBtn:hover {
+    background: #ffe082;
+  }
+  #mainMenuZoneSelectBtn {
+    background: #33384a;
+    color: #eee;
+  }
+  #mainMenuZoneSelectBtn:hover {
+    background: #46506b;
+  }
   /* QA 패널(구역 이동, js/engine/qapanel.js) - 페이드보다도 위(z-index 10)에 둬서 히트스톱/컷신/암전
      도중에도 항상 열고 조작할 수 있게 한다("막혔을 때 빠져나오는 비상구" 용도도 겸함). 다른 오버레이와
      달리 pointer-events: auto가 필요 - 버튼을 실제로 클릭해야 하기 때문(캔버스 위를 완전히 덮으므로
@@ -225,6 +272,11 @@
       <div id="qaPanelList"></div>
     </div>
   </div>
+  <div id="mainMenu">
+    <div id="mainMenuTitle">2D 액션 플랫포머 프로토타입</div>
+    <button id="mainMenuStartBtn" class="mainMenuBtn" type="button">게임 시작</button>
+    <button id="mainMenuZoneSelectBtn" class="mainMenuBtn" type="button">구역 선택</button>
+  </div>
 </div>
 
 <!--
@@ -250,6 +302,7 @@
 <script src="js/levels/f1z2-platforms.js"></script>
 <script src="js/levels/f1z3-melee-practice.js"></script>
 <script src="js/levels/f1z4-background-monsters.js"></script>
+<script src="js/engine/mainmenu.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

@@ -4,9 +4,13 @@
    QA 패널(구역 이동) - 존 그래프의 아무 존으로나 즉시 이동.
    =========================================================================
 
-   두 가지 용도를 겸한다: (1) 지금 당장은 QA/레벨 디자인 확인용("이 구역만 바로 열어서 보고 싶다"),
-   (2) 사용자 요청대로, 나중에 게임을 전부 클리어한 플레이어에게도 그대로 줄 "구역 선택" 기능 -
-   그래서 디버그용 임시 코드가 아니라 제대로 된 UI/정리 로직을 갖춘 상시 기능으로 만든다.
+   세 가지 용도를 겸한다: (1) 지금 당장은 QA/레벨 디자인 확인용("이 구역만 바로 열어서 보고 싶다"),
+   (2) 사용자 요청대로, 나중에 게임을 전부 클리어한 플레이어에게도 그대로 줄 "구역 선택" 기능,
+   (3) 메인 메뉴(js/engine/mainmenu.js)의 "구역 선택" 버튼이 여는 화면도 바로 이 패널이다 - 별도
+   화면을 새로 만들지 않고 그대로 재사용함. 그래서 디버그용 임시 코드가 아니라 제대로 된 UI/정리
+   로직을 갖춘 상시 기능으로 만든다. warpToZone()은 아직 게임 루프가 시작 전(메인 메뉴 단계)이어도
+   안전하게 호출 가능하도록 설계되어 있다 - 그래서 "게임 시작" 버튼조차 별도 부트스트랩 코드 없이
+   그냥 `warpToZone(BOOT_ZONE_ID)` 한 줄로 구현된다(mainmenu.js 참고).
 
    토글: Backquote(`) 키. heldKeys/justPressed(js/engine/input.js) 파이프라인을 안 타고 완전히
    독립된 keydown 리스너로 처리한다 - 그래야 타임스톱(히트스톱)이나 먹통난 컷신 도중에도(원래는
@@ -77,6 +81,10 @@ function warpToZone(zoneId) {
   player.pendingDamage.length = 0;
   player.driftTrail.length = 0;
   player.driftBurst = null;
+
+  // 아직 메인 메뉴 단계라 루프가 한 번도 안 돈 상태였다면(js/main.js) 여기서 처음 시작시킨다 -
+  // 이미 돌고 있으면 아무 일도 안 함(중복 시작 방지 - ensureLoopStarted 자체가 멱등).
+  ensureLoopStarted();
 }
 
 // 존 목록을 층별로 묶어서 다시 그린다 - 열 때마다 새로 그려서 "지금 여기 있음" 강조가 항상 최신
@@ -108,6 +116,8 @@ function renderQaPanelList() {
     btn.addEventListener("click", () => {
       warpToZone(id);
       closeQaPanel();
+      hideMainMenu(); // 메인 메뉴(mainmenu.js) 단계에서 이 패널로 바로 구역을 고른 경우 메뉴도 같이 치움 -
+      // 게임 중 백틱으로 연 경우엔 메뉴가 이미 숨겨져 있어 아무 효과 없음(멱등).
     });
     qaPanelListEl.appendChild(btn);
   }
