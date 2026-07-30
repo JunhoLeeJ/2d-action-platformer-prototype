@@ -132,8 +132,9 @@
      - W 또는 Space    : 점프 (이단 점프 가능, 혼용해서 눌러도 됨)
      - 마우스 좌클릭    : 근접 공격 - 땅에 있으면 마우스 커서 방향의 좁은 사각 판정, 공중이면 방향
                          무관 원형 판정(AIR_ATTACK_RADIUS, 데미지는 지상의 절반 - startAttack 참고).
-                         공중 공격은 매번 상승 속도를 AIR_ATTACK_HOP_FORCE로 덮어써 작은 "숏홉"을
-                         겸함 - 이단 점프와 이어붙이면 사실상 3단 점프도 가능(jumpsUsed를 안 씀)
+                         공중 공격은 상승 속도를 AIR_ATTACK_HOP_FORCE로 덮어써 작은 "숏홉"을 겸함 -
+                         이단 점프와 이어붙이면 사실상 3단 점프. 단 착지 전까지 MAX_AIR_ATTACKS(1)번만
+                         가능 - 안 그러면 공격 후딜레이가 짧아서 연타로 계속 공중에 떠있을 수 있음
      - 마우스 우클릭    : 표류(drift) 발동
      - 마우스 커서      : player.facing(근접 공격 방향)을 매 프레임 결정 - 이동 방향과 무관.
                          단, 표류 반격은 방향 무관(플레이어 중심 광역 판정)이라 이 값의 영향을 안 받음
@@ -182,6 +183,11 @@ const CONFIG = {
   // "추가 점프"로 느껴짐 - 조건 분기 없이 같은 대입 한 줄로 두 상황 모두 자연스럽게 처리됨.
   // 이단 점프(MAX_JUMPS=2)와 조합하면 점프 → 이단 점프 → 공중 공격을 이어붙여 사실상 3단 점프도 가능.
   AIR_ATTACK_HOP_FORCE: 420, // 공중 공격 시 적용되는 상승 속도 (px/sec) - JUMP_FORCE(760)의 최고 높이(~137px) 대비 약 42px로 "낮은" 점프
+  // 공중 공격은 attackRecovery(0.38s)가 점프 체공시간보다 훨씬 짧아서, 착지 없이 연타하면 매번
+  // AIR_ATTACK_HOP_FORCE로 상승 속도가 갱신되어 사실상 계속 공중에 떠있을 수 있었다. 점프 횟수
+  // (MAX_JUMPS)와 똑같은 방식으로 제한한다 - player.jumpsUsed/airAttacksUsed 둘 다 착지 시에만
+  // 0으로 리셋되므로, "점프 → 이단 점프 → 공중 공격 1회"가 한 번 땅을 밟기 전까지 낼 수 있는 전부.
+  MAX_AIR_ATTACKS: 1,        // 착지하기 전까지 공중 공격(=숏홉)을 쓸 수 있는 횟수
 
   // --- 근접 공격 ---
   // 땅/공중 판정은 모양(사각형 vs 원)과 데미지가 다르지만 활성/후딜레이 타이밍은 공유한다 (startAttack 참고).
@@ -475,6 +481,7 @@ const player = {
   facing: 1,        // -1(왼쪽)|1(오른쪽) - 이동 방향이 아니라 마우스 커서 방향으로 매 프레임 갱신됨 (updatePlayer 참고). 공격/반격 판정 방향이 이 값을 그대로 씀
   onGround: false,
   jumpsUsed: 0,
+  airAttacksUsed: 0, // 착지 전까지 쓴 공중 공격 횟수 - jumpsUsed와 동일하게 착지 시에만 0으로 리셋 (MAX_AIR_ATTACKS 참고)
 
   hp: CONFIG.PLAYER_MAX_HP,
   invincibleTimer: 0,
@@ -752,6 +759,7 @@ function respawnPlayer() {
   player.vy = 0;
   player.hp = CONFIG.PLAYER_MAX_HP;
   player.jumpsUsed = 0;
+  player.airAttacksUsed = 0;
   player.invincibleTimer = CONFIG.HIT_INVINCIBILITY_DURATION * 0.5;
   player.attackState = "idle";
   player.state = "anchor";
@@ -805,13 +813,19 @@ function updatePlayer(dt) {
   }
 
   // --- 공격 입력 / 상태 (좌클릭) ---
-  if (justPressed["Mouse0"] && player.attackState === "idle") {
+  // 공중 공격은 점프처럼 착지 전까지 MAX_AIR_ATTACKS번으로 제한된다 - 안 그러면 공격 후딜레이(0.38s)가
+  // 점프 체공시간보다 훨씬 짧아서 착지 없이 연타로 계속 공중에 떠있을 수 있었음. 지상 공격은 이 제한과
+  // 무관하게 항상 가능(player.onGround 조건). 다 썼는데 공중에서 좌클릭하면 그냥 아무 일도 안 일어남
+  // (jumpsUsed 다 쓰고 점프 누르는 것과 동일한 취급).
+  if (justPressed["Mouse0"] && player.attackState === "idle" &&
+      (player.onGround || player.airAttacksUsed < CONFIG.MAX_AIR_ATTACKS)) {
     startAttack();
     // 숏홉: 공중 공격은 매번 상승 속도를 AIR_ATTACK_HOP_FORCE로 덮어써서 작은 점프를 하나 더 만들어준다.
-    // jumpsUsed를 건드리지 않으므로 이단 점프를 다 쓴 뒤에도 나갈 수 있어(공격 자체의 후딜레이로만
-    // 제한됨), 점프 -> 이단 점프 -> 공중 공격을 이어붙이면 사실상 3단 점프가 됨.
+    // jumpsUsed를 건드리지 않으므로 이단 점프를 다 쓴 뒤에도 나갈 수 있고, 점프 -> 이단 점프 -> 공중
+    // 공격 1회를 이어붙이면 사실상 3단 점프가 됨 - 그 이상은 위 조건에 막혀 착지해야만 다시 가능.
     if (player.attackIsAirborne) {
       player.vy = -CONFIG.AIR_ATTACK_HOP_FORCE;
+      player.airAttacksUsed += 1;
     }
   }
   if (player.attackState === "active") {
@@ -886,6 +900,7 @@ function updatePlayer(dt) {
         player.vy = 0;
         player.onGround = true;
         player.jumpsUsed = 0;
+        player.airAttacksUsed = 0;
       } else if (player.vy < 0) {
         player.y = s.y + s.h;
         player.vy = 0;
@@ -905,6 +920,7 @@ function updatePlayer(dt) {
       player.vy = 0;
       player.onGround = true;
       player.jumpsUsed = 0;
+      player.airAttacksUsed = 0;
     }
   }
 
