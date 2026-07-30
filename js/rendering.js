@@ -118,21 +118,34 @@ function draw() {
     if (!enemy.alive) continue;
 
     const isChaser = enemy.type === "chaser";
+    const isMimeA = enemy.type === "mimeA";
+    const isMimeB = enemy.type === "mimeB";
+    // mimeA는 전투 로직(추적/근접 공격) 자체를 체이서와 공유하므로(makeMimeA 참고), "예고 중 보여주는
+    // 판정 미리보기"/"경고색 pulse" 같은 체이서 전용 시각 처리도 같이 타야 한다 - isChaser 단독이 아니라
+    // 이 합쳐진 플래그로 판정.
+    const isChaserLike = isChaser || isMimeA;
     const isSniper = enemy.type === "sniper";
-    const isWarning = isChaser ? enemy.aiState === "windup" : enemy.telegraphing;
+    const isWarning = isChaserLike ? enemy.aiState === "windup" : enemy.telegraphing;
     const baseColor = !enemy.stunnable
       ? "#8e44ad"
+      : isMimeA ? "#7c6a53" // 배경 몬스터 - 다른 전투형 몬스터들과 안 겹치는 흙빛 톤
+      : isMimeB ? "#5b6470" // 배경 몬스터 - 어두운 슬레이트, pulse로 밝아짐(아래)
       : isChaser ? "#5c8a3a"
       : isSniper ? "#00838f" // 포탑(빨강)/체이서(초록)/면역(보라)과 겹치지 않는 청록 - "다른 놈"이라는 신호
       : "#b23b3b";
     let color = enemy.flashTimer > 0 ? "#ffffff" : baseColor;
-    // 공격 예고 중에는 빠르게 밝아졌다 어두워지는 색으로 경고 (체이서는 근접 느낌의 붉은 계열,
+    // 공격 예고 중에는 빠르게 밝아졌다 어두워지는 색으로 경고 (체이서/mimeA는 근접 느낌의 붉은 계열,
     // 저격수는 투사체와 짝을 맞춘 마젠타 계열로 구분 - 반드시 피해야 하는 예고라는 걸 색으로도 강조)
     if (isWarning) {
       const pulse = (Math.sin(performance.now() / 60) + 1) / 2; // 0~1
-      color = isChaser ? (pulse > 0.5 ? "#ff5252" : "#ff8a65")
+      color = isChaserLike ? (pulse > 0.5 ? "#ff5252" : "#ff8a65")
         : isSniper ? (pulse > 0.5 ? "#f50057" : "#ff4081")
         : (pulse > 0.5 ? "#ffb300" : "#ff6f3c");
+    } else if (isMimeB && enemy.flashTimer <= 0) {
+      // 웅얼거림(§ 5 아트 제약) - 감지/공격 개념 자체가 없는 완전 수동형이라 상시로 옅게 밝아졌다
+      // 어두워지는 pulse만 있음. enemy.id를 위상에 섞어서 여러 마리가 있어도 똑같이 안 움직이게 함.
+      const pulse = (Math.sin(performance.now() / CONFIG.MIME_B_PULSE_SPEED + enemy.id) + 1) / 2;
+      color = pulse > 0.5 ? "#aeb8c4" : baseColor;
     }
     drawRect(enemy, color);
     // "눈" - 플레이어 방향을 향하는 작은 원, 예고 중엔 커지고 밝아짐
@@ -141,6 +154,23 @@ function draw() {
     const cx = enemy.x + enemy.w / 2, cy = enemy.y + enemy.h / 2;
     ctx.arc(cx, cy, isWarning ? 9 : 6, 0, Math.PI * 2);
     ctx.fill();
+    // 적 A 전용(§ 5 아트 제약: "몸통 사각형 + 팔이 일정 각도로 왔다갔다 회전") - 감지 전(patrol/return)엔
+    // 옆구리에 고정된 팔이 왔다갔다 흔들리고, 감지되면(chase/windup/recovery) 그 자리에 멈춘다.
+    // 항상 몸통 오른쪽에 고정해서 그림 - facing에 따라 반대로 뒤집지 않는 단순화(플레이스홀더라 무관).
+    if (isMimeA) {
+      const idle = enemy.aiState === "patrol" || enemy.aiState === "return";
+      const restAngle = -0.3;
+      const angle = idle
+        ? restAngle + Math.sin(performance.now() / 1000 * CONFIG.MIME_A_ARM_SWING_SPEED + enemy.id) * CONFIG.MIME_A_ARM_SWING_ANGLE
+        : restAngle;
+      const armLen = enemy.w * 0.9, armThick = 6;
+      ctx.save();
+      ctx.translate(enemy.x + enemy.w, enemy.y + enemy.h * 0.35);
+      ctx.rotate(angle);
+      ctx.fillStyle = color;
+      ctx.fillRect(0, -armThick / 2, armLen, armThick);
+      ctx.restore();
+    }
     // 체력 pip (마름모, 반칸 표현 가능 - drawHpPip 참고). 슬롯 개수는 maxHp 기준으로 고정,
     // 각 슬롯이 얼마나 채워졌는지는 남은 hp를 슬롯별로 0~1로 잘라서 계산.
     const pipSize = 11, gap = 4;
@@ -154,8 +184,8 @@ function draw() {
       pipCx += pipSize + gap;
     }
 
-    // 체이서 전용: 공격 예고(선딜레이) 중에는 실제로 맞을 범위를 미리 그려서 보여줌
-    if (isChaser && enemy.aiState === "windup") {
+    // 체이서/mimeA 전용: 공격 예고(선딜레이) 중에는 실제로 맞을 범위를 미리 그려서 보여줌
+    if (isChaserLike && enemy.aiState === "windup") {
       const hb = getChaserAttackHitbox(enemy);
       ctx.fillStyle = "rgba(255,82,82,0.35)";
       ctx.fillRect(hb.x, hb.y, hb.w, hb.h);

@@ -109,8 +109,40 @@ function makeChaser(x, y, opts = {}) {
   };
 }
 
+// 적 A(mimeA, 1층 구역 4 "배경 몬스터") - 전투 능력은 체이서를 그대로 재사용한다. makeChaser가 만든
+// 오브젝트를 그대로 받아 type/체력만 덮어씀 - detectionRange/leashRange/attackRange/aiState 등
+// updateChaserAI가 읽는 필드가 전부 이미 갖춰진 채로 나오므로, updateChaserAI는 mimeA를 chaser와
+// 완전히 동일하게 다룰 수 있다(타입 자체를 내부에서 검사하지 않는 함수라 가능). 새로 생기는 건
+// 유휴 손짓 애니메이션이 참고하는 aiState뿐 - 별도 타이머/위상 필드 없이 draw()가 performance.now()
+// (enemy.id로 위상만 개체별로 다르게)를 직접 읽어서 그린다(포탑 예고 pulse와 같은 패턴).
+function makeMimeA(x, y, opts = {}) {
+  const chaser = makeChaser(x, y, opts);
+  return { ...chaser, type: "mimeA", hp: CONFIG.MIME_A_MAX_HP, maxHp: CONFIG.MIME_A_MAX_HP };
+}
+
+// 적 B(mimeB, 1층 구역 4) - 완전 수동형. 감지/어그로/공격 범위 자체가 없어(다른 몬스터와 달리
+// makeStationaryRangeFields를 안 씀) updateEnemies가 이 타입엔 AI 업데이트 함수를 아예 안 돌린다
+// (아래 updateEnemies 참고) - 화면에 그냥 서서 몸통 색만 옅게 pulse한다("웅얼거림", 시각적 동작 없음).
+function makeMimeB(x, y, opts = {}) {
+  const stunnable = opts.stunnable ?? true;
+  return {
+    id: enemyIdCounter++,
+    type: "mimeB",
+    spawnX: x, spawnY: y,
+    x, y, w: 34, h: 40,
+    hp: CONFIG.MIME_B_MAX_HP,
+    maxHp: CONFIG.MIME_B_MAX_HP,
+    alive: true,
+    flashTimer: 0,
+    hasBeenVisible: false,
+    stunnable,
+    hpFloor: opts.hpFloor ?? null,
+    timeSinceHit: Infinity,
+  };
+}
+
 // 존 데이터의 enemySpawns[i].type을 실제 팩토리 함수로 매핑 - loadZone()이 이걸로 몬스터를 새로 만든다.
-const ENEMY_FACTORIES = { turret: makeTurret, sniper: makeSniper, chaser: makeChaser };
+const ENEMY_FACTORIES = { turret: makeTurret, sniper: makeSniper, chaser: makeChaser, mimeA: makeMimeA, mimeB: makeMimeB };
 
 // 현재 존에 살아있는 몬스터 목록 - 존을 옮길 때마다(loadZone) 통째로 비우고 그 존의 enemySpawns로부터
 // 다시 채워진다. 예전 resetEnemies()는 삭제됨 - "리셋"이 아니라 "항상 새로 만든다"라서 이전 존/이전
@@ -129,16 +161,17 @@ function damageEnemy(enemy, amount) {
   // 스턴: 맞으면 공격 준비 상태를 초기화 - 계속 때리면 영원히 공격을 못 하게 됨.
   // stunnable이 false인 몬스터(보라색)는 이 효과에서 제외.
   if (enemy.stunnable) {
-    if (enemy.type === "chaser") {
+    if (enemy.type === "chaser" || enemy.type === "mimeA") {
       if (enemy.aiState === "windup") {
         enemy.aiState = "chase"; // 근접 공격 선딜레이 캔슬 - 다시 다가와서 처음부터 다시 예고해야 함
         enemy.attackTimer = 0;
       }
       enemy.stunTimer = CONFIG.CHASER_STUN_DURATION; // 이 시간 동안은 사거리 안이어도 재진입 불가
-    } else {
+    } else if (enemy.type === "turret" || enemy.type === "sniper") {
       enemy.fireTimer = CONFIG.TURRET_FIRE_INTERVAL;
       enemy.telegraphing = false;
     }
+    // mimeB: 완전 수동형이라 공격 준비 상태 자체가 없음 - 리셋할 게 없어서 분기 없음.
   }
   if (enemy.hp <= 0) {
     // hpFloor가 있으면 그 값에서 멈추고 죽지 않는다 - HP가 깎이는 티는 그대로 나되(핍이 거의 빔)
@@ -332,7 +365,8 @@ function updateEnemies(dt) {
     // (화면에 등장하는 순간부터 정상적으로 움직이기 시작해서, 예고 없이 갑자기 당하는 일이 없음)
     if (!enemy.hasBeenVisible) continue;
 
-    if (enemy.type === "chaser") updateChaserAI(enemy, dt);
+    if (enemy.type === "chaser" || enemy.type === "mimeA") updateChaserAI(enemy, dt);
+    else if (enemy.type === "mimeB") { /* 완전 수동형 - AI 없음, draw()에서 pulse만 그림 */ }
     else updateTurretAI(enemy, dt);
   }
 }

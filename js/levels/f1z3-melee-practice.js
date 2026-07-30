@@ -49,12 +49,13 @@
       { id: "start", x: 40, y: standingTopY, active: false },
     ],
 
-    // 오른쪽 문은 아직 다음 구역(구역 4: 배경 몬스터)이 없어서 null - 다음 세션에서 이어붙일 자리.
-    // (다음에 오른쪽 문을 달 때는 f1z1_entry/f1z2_platforms의 door.right처럼 yMax와 landingY(이 존은
-    // groundY)를 반드시 같이 챙길 것 - 모든 문에 공통으로 적용하는 규칙, CLAUDE.md 참고.)
+    // 오른쪽 문 - 구역 4(배경 몬스터)로 연결. 땅바닥 문이라 yMin은 안 둠(f1z1_entry와 동일 패턴).
     doors: {
       left: { x: 40, y: groundY - doorH, w: 40, h: doorH }, // 벽(0~40) 바로 뒤, 바닥에 딱 맞닿게(sunk 방지)
-      right: null,
+      right: {
+        x: 1620, y: groundY - doorH, w: 40, h: doorH,
+        targetZoneId: "f1z4_background_monsters", yMax: standingTopY + 25, landingY: groundY,
+      },
     },
 
     triggerZones: [
