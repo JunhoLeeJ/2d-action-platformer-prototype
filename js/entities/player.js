@@ -244,11 +244,16 @@ function updatePlayer(dt) {
   const attackInputActive = player.onGround ? heldKeys["Mouse0"] : justPressed["Mouse0"];
   if (attackInputActive && !getRuleFlag("disableAttack") && player.attackState === "idle" &&
       (player.onGround || player.airAttacksUsed < CONFIG.MAX_AIR_ATTACKS)) {
-    // 공격을 시작하는 이 순간엔 마우스 방향이 이동 방향보다 우선권을 가져간다(위 방향 갱신 블록 참고) -
-    // 그래야 예를 들어 오른쪽으로 달리는 중에도 마우스가 왼쪽이면 왼쪽을 벨 수 있다. 이후 스윙이
-    // active인 동안은 위 블록의 첫 줄 조건(attackState==="active") 때문에 이 값 그대로 고정되어
-    // 이동 방향이 다시 끼어들 수 없다 - 스윙이 끝나야(recovery 진입) 비로소 이동 방향이 재개된다.
-    player.facing = getMouseWorldX() < player.x + player.w / 2 ? -1 : 1;
+    // 마우스가 이동 방향의 주도권을 가져가는 건 지상 공격뿐 - 그래야 예를 들어 오른쪽으로 달리는
+    // 중에도 마우스가 왼쪽이면 왼쪽을 벨 수 있다. 이후 스윙이 active인 동안은 위 블록의 첫 줄 조건
+    // (attackState==="active") 때문에 이 값 그대로 고정되어 이동 방향이 다시 끼어들 수 없다 - 스윙이
+    // 끝나야(recovery 진입) 비로소 이동 방향이 재개된다. 공중 공격은 이 덮어쓰기 자체를 건너뛴다 -
+    // 원형 판정이라 방향이 무의미하기도 하고, 사용자 요청대로 "가던 방향 그대로" 유지해야 하기 때문
+    // (표류 반격도 마찬가지로 facing을 아예 안 건드림 - performDriftCounterAttack/finishDrift 참고,
+    // 애초에 방향 무관 광역 판정이라 이 값을 쓰지도 않음).
+    if (player.onGround) {
+      player.facing = getMouseWorldX() < player.x + player.w / 2 ? -1 : 1;
+    }
     startAttack();
     // 숏홉: 공중 공격은 매번 상승 속도를 AIR_ATTACK_HOP_FORCE로 덮어써서 작은 점프를 하나 더 만들어준다.
     // jumpsUsed를 건드리지 않으므로 이단 점프를 다 쓴 뒤에도 나갈 수 있고, 점프 -> 이단 점프 -> 공중
