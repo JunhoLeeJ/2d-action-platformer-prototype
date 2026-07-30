@@ -166,6 +166,15 @@ function updatePlayer(dt) {
   tickHpRegen(player, dt);
   if (player.postAttackLockTimer > 0) player.postAttackLockTimer -= dt;
 
+  // 지상 공격으로 인한 조작 잠금(이동 + 점프 전부) - 스윙의 active/recovery 상태이거나(공중 공격은
+  // 제외 - attackIsAirborne 체크), 후딜레이 직후의 짧은 여유시간(postAttackLockTimer)이 아직 남아있는
+  // 동안 true. 예전엔 이동만 막고 점프는 그대로 통과되던 버그가 있었음(사용자 피드백으로 발견) -
+  // 이동/점프 두 입력이 각자 조건을 따로 들고 있다가 어긋난 것이 원인이라, 하나의 플래그로 통일해
+  // 두 입력이 항상 같은 기준으로 막히게 함.
+  const groundAttackControlLocked =
+    (player.attackState !== "idle" && !player.attackIsAirborne) ||
+    player.postAttackLockTimer > 0;
+
   // --- 조준 방향: 이동 방향과 무관하게, 매 프레임 마우스 커서가 있는 쪽을 향하도록 갱신.
   // 근접 공격 판정(getAttackHitbox)이 이 값을 그대로 쓰기 때문에 "왼쪽으로 이동 중이어도
   // 커서가 오른쪽이면 오른쪽을 공격"이 자동으로 성립한다. (표류 반격은 방향 무관 - 플레이어
@@ -188,12 +197,13 @@ function updatePlayer(dt) {
   updateDrift(dt);
 
   // --- 좌우 이동 (A/D) ---
-  // postAttackLockTimer > 0인 동안은 입력 자체를 무시한다(지상 공격 후딜레이가 끝난 직후의 짧은
-  // 여유시간 - GROUND_ATTACK_POST_RECOVERY_LOCK_DURATION 참고). 스윙의 active/recovery 상태 자체는
-  // 여기서 안 막아도 된다 - 아래 공격 처리 블록이 이동 입력 처리 "이후"에 실행되며 그 두 상태 동안의
-  // vx를 각각 쏠림/정지로 덮어쓰므로, 여기서 계산한 move가 어차피 무시된다.
+  // groundAttackControlLocked인 동안은 입력 자체를 무시한다. 스윙의 active/recovery 상태 자체는 사실
+  // 이 게이트가 없어도 결과가 같다 - 아래 공격 처리 블록이 이동 입력 처리 "이후"에 실행되며 그 두
+  // 상태 동안의 vx를 각각 쏠림/정지로 다시 덮어쓰기 때문. 그래도 여기서 명시적으로 막아두는 이유는
+  // postAttackLockTimer 구간(attackState가 이미 "idle"이라 뒤에서 덮어쓸 코드가 없음)까지 같은
+  // 플래그 하나로 일관되게 처리하기 위함.
   let move = 0;
-  if (player.postAttackLockTimer <= 0) {
+  if (!groundAttackControlLocked) {
     if (heldKeys["KeyA"]) move -= 1;
     if (heldKeys["KeyD"]) move += 1;
   }
@@ -205,7 +215,9 @@ function updatePlayer(dt) {
   if (player.vy > CONFIG.MAX_FALL_SPEED) player.vy = CONFIG.MAX_FALL_SPEED;
 
   // --- 점프 입력 (W 또는 Space, 둘 다 동일하게 동작) ---
-  if ((justPressed["KeyW"] || justPressed["Space"]) && !getRuleFlag("disableJump") &&
+  // groundAttackControlLocked 동안은 점프도 막는다 - 원래 이동만 막고 점프는 그대로 통과되던 버그가
+  // 있었음(지상 공격으로 "조작 불가" 상태인데 점프로는 빠져나갈 수 있었던 것 - 사용자 피드백으로 발견).
+  if ((justPressed["KeyW"] || justPressed["Space"]) && !getRuleFlag("disableJump") && !groundAttackControlLocked &&
       player.jumpsUsed < CONFIG.MAX_JUMPS) {
     player.vy = -CONFIG.JUMP_FORCE;
     player.jumpsUsed += 1;
