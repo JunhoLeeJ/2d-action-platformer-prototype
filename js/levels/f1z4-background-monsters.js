@@ -17,6 +17,7 @@
 
   ZONES["f1z4_background_monsters"] = {
     id: "f1z4_background_monsters",
+    name: "1층 구역 4 - 배경 몬스터",
     floor: 1,
 
     width: 1800,

@@ -29,6 +29,7 @@
 
   ZONES["f1z2_platforms"] = {
     id: "f1z2_platforms",
+    name: "1층 구역 2 - 플랫폼 형식",
     floor: 1,
 
     width: 1900,

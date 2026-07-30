@@ -16,6 +16,7 @@
 
   ZONES["f2z3_legacy_arena"] = {
     id: "f2z3_legacy_arena",
+    name: "2층 구역 3 - 몬스터들 (레거시 아레나)",
     floor: 2, // 참고용 메타데이터일 뿐 - 실제 층 전환 로직은 없음 (zones.js 주석 참고)
 
     width: 3840, // 캔버스 너비(1440)의 약 2.7배 - 가로 스크롤 레벨

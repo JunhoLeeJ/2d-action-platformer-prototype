@@ -19,6 +19,7 @@
 
   ZONES["f1z1_entry"] = {
     id: "f1z1_entry",
+    name: "1층 구역 1 - 진입부", // QA 패널(js/engine/qapanel.js)/향후 HUD 표시용 사람이 읽을 수 있는 이름
     floor: 1,
 
     width: 1600,

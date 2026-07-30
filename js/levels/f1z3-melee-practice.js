@@ -22,6 +22,7 @@
 
   ZONES["f1z3_melee_practice"] = {
     id: "f1z3_melee_practice",
+    name: "1층 구역 3 - 근접 공격 연습",
     floor: 1,
 
     width: 1700,

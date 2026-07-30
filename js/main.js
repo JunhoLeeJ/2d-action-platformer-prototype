@@ -18,6 +18,8 @@
      - 마우스 우클릭    : 표류(drift) 발동
      - 마우스 커서      : player.facing(근접 공격 방향)을 매 프레임 결정 - 이동 방향과 무관.
                          단, 표류 반격은 방향 무관(플레이어 중심 광역 판정)이라 이 값의 영향을 안 받음
+     - ` (백틱)         : QA 패널(구역 이동) 토글 - 존 그래프의 아무 존으로나 즉시 이동(js/engine/qapanel.js).
+                         QA용이자 향후 게임 클리어 보상 기능으로도 그대로 쓸 예정이라 제대로 만들어져 있음
 
    핵심 전투 시스템 3개가 서로 맞물려 있음(js/entities/player.js):
 
@@ -59,6 +61,7 @@
      js/engine/zones.js              ZONES, currentZone, loadZone(), 규칙 플래그
      js/engine/checkpoint.js         currentCheckpoint, activateCheckpoint()
      js/engine/cutscene.js           트리거 시퀀스 엔진, 텍스트박스, 페이드
+     js/engine/qapanel.js            QA 패널(구역 이동) - qaPanelOpen, warpToZone()
      js/rendering.js                 draw(), updateHud()
      js/levels/*.js                  존 데이터 (ZONES에 등록) - zones.js 다음에 로드되어야 함
      js/main.js                      이 파일 - update()/loop()/부트스트랩, 반드시 맨 마지막에 로드
@@ -96,7 +99,14 @@ function loop(now) {
   lastTime = now;
   dt = Math.min(dt, 0.033); // 탭 전환 등으로 인한 프레임 급증 방지
 
-  if (timeStopTimer > 0) {
+  if (qaPanelOpen) {
+    // QA 패널(js/engine/qapanel.js)이 열려있는 동안은 게임 전체를 멈춘다(타임스톱과 같은 원리) -
+    // 패널을 보는 동안 몬스터가 움직이거나 쿨다운/유예시간이 흘러가면 안 되기 때문. update() 자체를
+    // 안 부르지만 그 함수 마지막 줄이 하던 justPressed 비우기는 여기서도 그대로 해줘야 한다 - 안
+    // 그러면 패널이 열려있던 동안 눌린 키(Space 등)가 패널을 닫는 순간 "막 눌린 것"으로 오인돼
+    // 의도치 않은 입력(점프 등)으로 튀어나온다.
+    for (const k in justPressed) delete justPressed[k];
+  } else if (timeStopTimer > 0) {
     // update() 자체를 건너뛴다 - 플레이어/적/투사체/무적시간 등 모든 타이머가 이 프레임엔 그대로 정지.
     // 화면은 계속 그려서(draw) "멈춘 순간"이 화면에 정지 프레임으로 보이게 한다.
     timeStopTimer = Math.max(0, timeStopTimer - dt);
