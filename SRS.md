@@ -61,6 +61,7 @@
 - FR-3.5b (지상 공격 조작 잠금은 이동뿐 아니라 점프도 막음) `player.attackState !== "idle" && !player.attackIsAirborne`(FR-3.3b/FR-3.5의 active/recovery 구간) 이거나 `postAttackLockTimer > 0`(FR-3.5a)인 동안은 `groundAttackControlLocked` 플래그가 true가 되어, 좌우 이동 입력뿐 아니라 점프 입력(`justPressed["Space"]`)도 무시된다 — 최초 구현 시 이동만 막고 점프는 그대로 통과되던 버그가 있었음(사용자 피드백으로 발견). 이동/점프 두 입력이 하나의 플래그를 공유하므로 항상 같은 기준으로 함께 막히거나 풀린다. 공중 공격은 `attackIsAirborne`이 true라 이 플래그가 항상 false — 기존처럼 후딜레이 중에도 점프가 자유로움.
 - FR-3.6 숏홉(낮은 점프): 공격 입력이 `startAttack()`을 트리거하는 순간 `attackIsAirborne`이 true이면(타이밍 조건 없음, 매번) `player.vy`를 무조건 `-AIR_ATTACK_HOP_FORCE`(420)로 덮어쓴다. `jumpsUsed`를 소모/참조하지 않으므로 이단 점프를 다 쓴 뒤(`jumpsUsed=MAX_JUMPS`)에도 발동. 일반 점프(`JUMP_FORCE`=760, 최고 높이 ~137.5px) 대비 숏홉 최고 높이는 ~42px.
 - FR-3.7 공중 공격 횟수 제한: `player.airAttacksUsed`가 `CONFIG.MAX_AIR_ATTACKS`(1) 이상이면, 공중(`!player.onGround`)에서의 좌클릭은 `attackState==="idle"`이어도 `startAttack()` 자체가 호출되지 않음(스윙/판정/숏홉 전부 없음 - 점프 횟수를 다 쓰고 점프 입력을 누르는 것과 동일 취급). 지상 공격은 이 제한과 무관하게 항상 가능. `airAttacksUsed`는 공중 공격이 발동할 때마다 1 증가하고, `jumpsUsed`와 동일한 착지 판정 지점(고정형/원웨이 플랫폼 착지, 리스폰) 각각에서 0으로 리셋됨. 결과적으로 한 번 착지한 뒤 낼 수 있는 최대 상승 횟수는 점프(`MAX_JUMPS`=2) + 공중 공격(`MAX_AIR_ATTACKS`=1) = 3회(FR-3.6의 "사실상 3단 점프")로 고정되며, 착지 없이는 그 이상 불가능.
+- FR-3.8 (숏홉 콤보 입력 보정) 점프(`Space`)와 공격(`Mouse0`) 클릭을 사람이 인지할 수 없을 만큼 짧은 간격으로 거의 동시에 누르면, 입력 이벤트 처리 순서가 미세하게 흔들려 공격이 점프보다 아주 살짝 먼저 처리될 수 있다 — 그 경우 그 순간 아직 `onGround`가 `true`이므로 스윙이 지상 공격으로 확정되고, 곧바로 이어지는 점프 입력이 FR-3.5b의 조작 잠금에 막혀 콤보가 깨지는 문제가 있었다. 이를 보정하기 위해, 지상 스윙이 시작된 지 `CONFIG.GROUND_ATTACK_JUMP_CONVERSION_WINDOW`(0.06s) 이내에 점프가 들어오고(`player.attackState==="active" && !player.attackIsAirborne`이고 경과 시간이 이 값 이하) `player.airAttacksUsed < MAX_AIR_ATTACKS`이면, 그 스윙을 공중 공격으로 전환한다: `attackIsAirborne=true`, `attackTimer`를 공중 공격 본연의 활성 시간(`ATTACK_ACTIVE_DURATION`)으로 재설정, `vy=-AIR_ATTACK_HOP_FORCE`, `airAttacksUsed+=1`, `jumpsUsed+=1`. `hitEnemiesThisSwing`은 일부러 비우지 않는다 — 전환 전 그 짧은 몇 프레임 사이에 지상 판정으로 이미 맞춘 적이 있었다면, 전환 직후 공중 판정으로 같은 적을 또 맞추는 이중 히트를 막기 위함. 이 유예시간(0.06s)을 넘겨서 점프가 들어오면(플레이어가 "공격부터 하고 한참 뒤에 점프를 눌렀다"고 인지할 시점) 절대 전환하지 않고 FR-3.5b대로 그대로 막는다 — 의도치 않은 스킬 발동을 억지로 만들어주지 않기 위해 유예시간을 일부러 짧게 잡음.
 
 ### FR-4. 피격 유예 (anchor 상태)
 - FR-4.1 모든 피격(`damagePlayer`)은 즉시 HP를 깎지 않고 `pendingDamage`에 `{amount, timer=DRIFT_DAMAGE_GRACE_PERIOD(0.5s)}`로 push. 단, `invincibleTimer > 0`이면 아예 등록되지 않음(무시).
@@ -189,7 +190,7 @@ chaser: `patrolMinX,patrolMaxX,facing,aiState,attackTimer,stunTimer,perceptionTi
 | 그룹 | 키 | 현재값 |
 |---|---|---|
 | 이동 | MOVE_SPEED / GRAVITY / MAX_FALL_SPEED / JUMP_FORCE / MAX_JUMPS | 420 / 2100 / 1400 / 760 / 2 |
-| 이동(숏홉) | AIR_ATTACK_HOP_FORCE / MAX_AIR_ATTACKS | 420 / 1 |
+| 이동(숏홉) | AIR_ATTACK_HOP_FORCE / MAX_AIR_ATTACKS / GROUND_ATTACK_JUMP_CONVERSION_WINDOW | 420 / 1 / 0.06 |
 | 근접 공격(지상) | ATTACK_RANGE_W/H / GROUND_ATTACK_ACTIVE_DURATION / GROUND_ATTACK_LUNGE_DISTANCE / GROUND_ATTACK_RECOVERY_DURATION / GROUND_ATTACK_POST_RECOVERY_LOCK_DURATION / ATTACK_DAMAGE | 85/75 / 0.13 / 10 / 0.14 / 0.03 / 1 |
 | 체력 자연 회복(플레이어+몬스터, hpRegenDelay 걸린 존만) | HP_REGEN_DELAY | 2.5 |
 | 근접 공격(공중) | AIR_ATTACK_RADIUS / 데미지(getAirAttackDamage = ATTACK_DAMAGE/2) | 85 / 0.5 |

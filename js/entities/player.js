@@ -218,9 +218,34 @@ function updatePlayer(dt) {
   // --- 점프 입력 (Space) ---
   // groundAttackControlLocked 동안은 점프도 막는다 - 원래 이동만 막고 점프는 그대로 통과되던 버그가
   // 있었음(지상 공격으로 "조작 불가" 상태인데 점프로는 빠져나갈 수 있었던 것 - 사용자 피드백으로 발견).
-  if (justPressed["Space"] && !getRuleFlag("disableJump") && !groundAttackControlLocked &&
-      player.jumpsUsed < CONFIG.MAX_JUMPS) {
-    player.vy = -CONFIG.JUMP_FORCE;
+  //
+  // 예외(숏홉 콤보 보정, GROUND_ATTACK_JUMP_CONVERSION_WINDOW 참고): 점프와 공격 클릭을 사람이 인지
+  // 못 할 만큼 짧은 간격으로 거의 동시에 누르면, 입력 이벤트 처리 순서가 미세하게 흔들려서 공격이
+  // 점프보다 아주 살짝 먼저 처리될 수 있다 - 그 경우 그 스윙이(아직 onGround가 true였으므로) 지상
+  // 공격으로 확정되어버려 곧바로 이어지는 이 점프 입력이 위 조작 잠금에 막혀버린다. 그 스윙이 시작된
+  // 지 GROUND_ATTACK_JUMP_CONVERSION_WINDOW 이내라면(=사람이 인지할 수 없을 정도로 짧은 차이),
+  // canConvertToShortHop이 true가 되어 아래에서 그 스윙을 공중 공격으로 전환한다. 이 유예시간을
+  // 넘겨서 점프가 들어오면(플레이어가 "공격부터 하고 한참 뒤에 점프를 눌렀다"고 인지할 시점) 절대
+  // 전환하지 않고 원래대로 막는다 - 의도치 않은 스킬 발동을 억지로 만들어주면 안 되기 때문.
+  const canConvertToShortHop =
+    player.attackState === "active" && !player.attackIsAirborne &&
+    player.airAttacksUsed < CONFIG.MAX_AIR_ATTACKS &&
+    (CONFIG.GROUND_ATTACK_ACTIVE_DURATION - player.attackTimer) <= CONFIG.GROUND_ATTACK_JUMP_CONVERSION_WINDOW;
+
+  if (justPressed["Space"] && !getRuleFlag("disableJump") && player.jumpsUsed < CONFIG.MAX_JUMPS &&
+      (!groundAttackControlLocked || canConvertToShortHop)) {
+    if (canConvertToShortHop) {
+      // 방금 지상 공격으로 확정된 스윙을 공중 공격으로 전환 - startAttack()을 다시 부르지 않고 직접
+      // 필드만 바꾸는 이유는, startAttack()이 hitEnemiesThisSwing을 비워버려서(이미 그 몇 프레임
+      // 사이에 지상 판정으로 맞춘 적이 있었다면) 곧바로 이어지는 공중 판정으로 같은 적을 또 맞추는
+      // 하이브리드 이중 히트가 생길 수 있기 때문 - 비우지 않고 그대로 이어받아 안전하게 막는다.
+      player.attackIsAirborne = true;
+      player.attackTimer = CONFIG.ATTACK_ACTIVE_DURATION; // 공중 공격 본연의 활성 시간으로 재설정
+      player.vy = -CONFIG.AIR_ATTACK_HOP_FORCE;
+      player.airAttacksUsed += 1;
+    } else {
+      player.vy = -CONFIG.JUMP_FORCE;
+    }
     player.jumpsUsed += 1;
     // 이 프레임 안에서 곧바로 아래 공격 입력 블록이 실행되는데, 그 블록은 attackIsAirborne을
     // player.onGround로 판정한다. onGround 자체는 Y축 처리(이 아래, 이번 프레임 후반부)에서만 갱신되므로
