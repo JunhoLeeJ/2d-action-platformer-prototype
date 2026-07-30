@@ -221,6 +221,13 @@ function updatePlayer(dt) {
       player.jumpsUsed < CONFIG.MAX_JUMPS) {
     player.vy = -CONFIG.JUMP_FORCE;
     player.jumpsUsed += 1;
+    // 이 프레임 안에서 곧바로 아래 공격 입력 블록이 실행되는데, 그 블록은 attackIsAirborne을
+    // player.onGround로 판정한다. onGround 자체는 Y축 처리(이 아래, 이번 프레임 후반부)에서만 갱신되므로
+    // 안 건드리면 "방금 점프했지만 이번 프레임 내내 onGround가 여전히 true"인 채로 남아있었다 -
+    // 점프와 공격을 같은 프레임에(거의 동시에) 누르면 실제로는 막 공중으로 뜬 순간인데도 지상 공격으로
+    // 판정되어(레거시 onGround 값을 봄) 지상 공격 전용 조작 잠금이 걸려버리는 문제가 있었음(숏홉 콤보를
+    // 빠르게 연타할 때 사용자가 실제로 겪은 버그). 점프를 트리거하는 즉시 여기서 갱신해 바로잡는다.
+    player.onGround = false;
   }
 
   // --- 공격 입력 / 상태 (좌클릭) ---
@@ -228,7 +235,13 @@ function updatePlayer(dt) {
   // 점프 체공시간보다 훨씬 짧아서 착지 없이 연타로 계속 공중에 떠있을 수 있었음. 지상 공격은 이 제한과
   // 무관하게 항상 가능(player.onGround 조건). 다 썼는데 공중에서 좌클릭하면 그냥 아무 일도 안 일어남
   // (jumpsUsed 다 쓰고 점프 누르는 것과 동일한 취급).
-  if (justPressed["Mouse0"] && !getRuleFlag("disableAttack") && player.attackState === "idle" &&
+  // 지상 공격은 좌클릭을 "누르고 있는 동안" 자동으로 연타되고(heldKeys - 연타 피로도 줄이기 위한 사용자
+  // 요청), 공중 공격은 여전히 "매번 새로 클릭"해야만 나간다(justPressed) - 숏홉(위 점프 트리거 참고)은
+  // 착지 전까지 MAX_AIR_ATTACKS(1)로 엄격히 제한된 소중한 자원이라, 좌클릭을 쥐고 있다는 이유만으로
+  // 의도치 않게 그 1회를 원하는 타이밍보다 먼저 써버리면 안 되기 때문 - 홀드 연타는 오직 이 자원 제한이
+  // 없는 지상 공격에만 적용해 서로 절대 충돌하지 않게 함.
+  const attackInputActive = player.onGround ? heldKeys["Mouse0"] : justPressed["Mouse0"];
+  if (attackInputActive && !getRuleFlag("disableAttack") && player.attackState === "idle" &&
       (player.onGround || player.airAttacksUsed < CONFIG.MAX_AIR_ATTACKS)) {
     startAttack();
     // 숏홉: 공중 공격은 매번 상승 속도를 AIR_ATTACK_HOP_FORCE로 덮어써서 작은 점프를 하나 더 만들어준다.
