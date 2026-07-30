@@ -70,6 +70,10 @@
     },
 
     triggerZones: [],
-    ruleFlags: { hideGhostNpc: true, hpFloor: 1, hpRegenDelay: CONFIG.HP_REGEN_DELAY },
+    // hpRegenDelay는 일부러 안 넣음 - 무피격 시간 경과 후 즉시 풀피로 회복되는 그 기믹은 1층 구역
+    // 3(근접 공격 연습, `f1z3_melee_practice`)에서만 나오는 연습용 장치라는 게 사용자 확인 사항이라,
+    // 구역 4에는 켜면 안 됨(hpFloor만 유지 - "1층에서는 구역 5 제외 안 죽는다"는 층 전체 규칙은
+    // 별개로 계속 지킴, CLAUDE.md/ROADMAP.md 참고 - hpFloor와 hpRegenDelay는 독립된 레버).
+    ruleFlags: { hideGhostNpc: true, hpFloor: 1 },
   };
 })();

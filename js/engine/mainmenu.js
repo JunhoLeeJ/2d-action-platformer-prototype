@@ -15,11 +15,23 @@
                       (숨기지 않음) 구역을 실제로 고르면 그때 hideMainMenu()가 불려서 사라진다 -
                       그래서 패널만 닫고(Esc/`) 아무 것도 안 고르면 자연스럽게 메뉴로 되돌아온 것처럼
                       보인다(별도의 "뒤로가기" 로직이 필요 없음).
+
+   부트스트랩 이후에도 이 화면으로 다시 돌아올 수 있다 - 일시정지 메뉴(js/engine/pausemenu.js)의
+   "메인 화면" 버튼이 showMainMenu()를 부른다. 그 시점엔 이미 gameStarted=true라 ensureLoopStarted가
+   또 실행될 일은 없고, mainMenuOpen이 true가 되어 loop()(js/main.js)가 그동안 게임을 멈춰준다 -
+   그 뒤 "게임 시작"/"구역 선택"으로 뭘 고르든 warpToZone()이 다시 전부 새로 초기화하므로, 화면
+   뒤에 멈춰있던 이전 판의 상태는 그냥 덮어써질 뿐 따로 정리할 필요가 없다.
    ========================================================================= */
 
+let mainMenuOpen = true; // 부트스트랩 시점엔 항상 보이는 채로 시작
 const mainMenuEl = document.getElementById("mainMenu");
 
+function showMainMenu() {
+  mainMenuOpen = true;
+  mainMenuEl.style.display = "flex";
+}
 function hideMainMenu() {
+  mainMenuOpen = false;
   mainMenuEl.style.display = "none";
 }
 

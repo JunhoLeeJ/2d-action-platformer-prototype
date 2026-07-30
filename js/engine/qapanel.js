@@ -12,10 +12,11 @@
    안전하게 호출 가능하도록 설계되어 있다 - 그래서 "게임 시작" 버튼조차 별도 부트스트랩 코드 없이
    그냥 `warpToZone(BOOT_ZONE_ID)` 한 줄로 구현된다(mainmenu.js 참고).
 
-   토글: Backquote(`) 키. heldKeys/justPressed(js/engine/input.js) 파이프라인을 안 타고 완전히
-   독립된 keydown 리스너로 처리한다 - 그래야 타임스톱(히트스톱)이나 먹통난 컷신 도중에도(원래는
-   input이 그 상태와 맞물려 있음) 패널만은 항상 열 수 있어서, 워프가 "막혔을 때 빠져나오는 비상구"
-   역할도 겸할 수 있다.
+   열기/닫기/키보드 탐색(W/S/Space)의 실제 키 라우팅은 이 파일이 아니라 js/engine/pausemenu.js가
+   전담한다 - 백틱/Esc 하나로 "지금 열려있는 UI 레이어(QA 패널/일시정지 메뉴/메인 메뉴)가 뭔지"에
+   따라 다르게 반응해야 해서, 그 판단을 한 곳에 모아두는 게 각 파일이 서로 다른 keydown 리스너로
+   따로 반응하다가 충돌하는 것보다 안전하다(pausemenu.js 상단 주석 참고). 이 파일은 open/close/탐색용
+   함수만 내보내고, 실제로 언제 그 함수를 부를지는 pausemenu.js가 결정한다.
 
    열려있는 동안은 loop()(js/main.js)가 update() 자체를 건너뛰어 게임 전체가 멈춘다(타임스톱과 같은
    방식) - 패널을 보는 동안 몬스터가 움직이거나 피격 유예/쿨다운이 흘러가면 안 되기 때문. 다만
@@ -71,7 +72,11 @@ function warpToZone(zoneId) {
   player.timeSinceHit = Infinity;
   player.jumpsUsed = 0;
   player.airAttacksUsed = 0;
-  player.invincibleTimer = 0;
+  // respawnPlayer처럼 짧은 무적시간을 줘서(0으로 두지 않음) - 워프해서 도착한 자리가 하필 적 근접
+  // 사거리 안(예: 몬스터가 스폰 지점 바로 옆에 있는 존)이어도 화면을 파악할 틈도 없이 바로 얻어맞는
+  // 일이 없게 한다. 0으로 두면 몬스터가 붐비는 존으로 워프하는 순간 아무런 유예 없이 즉시 피격될
+  // 수 있어서(실제로 겪은 문제) respawnPlayer와 동일한 값으로 맞춤.
+  player.invincibleTimer = CONFIG.HIT_INVINCIBILITY_DURATION * 0.5;
   player.attackState = "idle";
   player.postAttackLockTimer = 0;
   player.state = "anchor";
@@ -87,10 +92,25 @@ function warpToZone(zoneId) {
   ensureLoopStarted();
 }
 
+// 마우스 클릭과 키보드(W/S로 이동, Space로 확정) 둘 다 결국 이 함수 하나로 수렴한다 - 워프 자체(그리고
+// 그 뒤처리)는 입력 수단과 무관하게 항상 동일해야 하므로.
+function pickZone(id) {
+  warpToZone(id);
+  closeQaPanel();
+  hideMainMenu(); // 메인 메뉴(mainmenu.js) 단계에서 이 패널로 바로 구역을 고른 경우 메뉴도 같이 치움 -
+  // 게임 중 백틱으로 연 경우엔 메뉴가 이미 숨겨져 있어 아무 효과 없음(멱등).
+}
+
+// 키보드 탐색(W/S)이 지금 가리키고 있는 항목의 인덱스 - qaPanelZoneIds와 같은 순서로 매칭된다.
+// 렌더링된 <button class="qaPanelZoneBtn">들이 헤딩(층 구분선)과 같은 리스트 안에 섞여 있지만,
+// qaPanelZoneIds는 헤딩을 빼고 존만 순서대로 담아두므로 인덱스가 항상 버튼 순서와 일치한다.
+let qaPanelZoneIds = [];
+let qaPanelSelectedIndex = 0;
+
 // 존 목록을 층별로 묶어서 다시 그린다 - 열 때마다 새로 그려서 "지금 여기 있음" 강조가 항상 최신
 // 상태를 반영하게 함(패널이 열려있는 동안엔 워프가 곧 패널을 닫으므로 다시 그릴 필요가 없음).
 function renderQaPanelList() {
-  const sortedIds = Object.keys(ZONES).sort((a, b) => {
+  qaPanelZoneIds = Object.keys(ZONES).sort((a, b) => {
     const za = ZONES[a], zb = ZONES[b];
     if (za.floor !== zb.floor) return za.floor - zb.floor;
     return a.localeCompare(b); // 같은 층 안에서는 zone id 알파벳 순 - 등록(스크립트 로드) 순서에 기대지 않기 위함
@@ -98,7 +118,7 @@ function renderQaPanelList() {
 
   qaPanelListEl.innerHTML = "";
   let lastFloor = null;
-  for (const id of sortedIds) {
+  for (const id of qaPanelZoneIds) {
     const def = ZONES[id];
     if (def.floor !== lastFloor) {
       lastFloor = def.floor;
@@ -113,18 +133,39 @@ function renderQaPanelList() {
     btn.className = "qaPanelZoneBtn";
     if (currentZone && currentZone.id === id) btn.classList.add("qaPanelZoneBtnCurrent");
     btn.textContent = (def.name || def.id) + (currentZone && currentZone.id === id ? " (현재 위치)" : "");
-    btn.addEventListener("click", () => {
-      warpToZone(id);
-      closeQaPanel();
-      hideMainMenu(); // 메인 메뉴(mainmenu.js) 단계에서 이 패널로 바로 구역을 고른 경우 메뉴도 같이 치움 -
-      // 게임 중 백틱으로 연 경우엔 메뉴가 이미 숨겨져 있어 아무 효과 없음(멱등).
-    });
+    btn.addEventListener("click", () => pickZone(id));
     qaPanelListEl.appendChild(btn);
   }
 }
 
+// i를 0~qaPanelZoneIds.length-1 범위로 순환시킴(맨 끝에서 더 내리면 맨 위로, 맨 위에서 올리면 맨 끝으로)
+function wrapQaPanelIndex(i) {
+  const len = qaPanelZoneIds.length;
+  return ((i % len) + len) % len;
+}
+
+// 키보드 포커스 표시를 다시 그림 - 인덱스가 바뀔 때마다(열 때 최초 1회 + W/S로 이동할 때마다) 호출.
+function applyQaPanelSelectionHighlight() {
+  const buttons = qaPanelListEl.querySelectorAll(".qaPanelZoneBtn");
+  buttons.forEach((btn, i) => btn.classList.toggle("qaPanelZoneBtnFocused", i === qaPanelSelectedIndex));
+}
+
+function moveQaPanelSelection(delta) {
+  qaPanelSelectedIndex = wrapQaPanelIndex(qaPanelSelectedIndex + delta);
+  applyQaPanelSelectionHighlight();
+}
+
+function confirmQaPanelSelection() {
+  const id = qaPanelZoneIds[qaPanelSelectedIndex];
+  if (id != null) pickZone(id);
+}
+
 function openQaPanel() {
   renderQaPanelList();
+  // 키보드 탐색 시작 위치는 "지금 있는 존"에 맞춰준다 - 없으면(메인 메뉴 단계 등) 맨 위(0)부터.
+  const currentIndex = qaPanelZoneIds.indexOf(currentZone ? currentZone.id : null);
+  qaPanelSelectedIndex = currentIndex >= 0 ? currentIndex : 0;
+  applyQaPanelSelectionHighlight();
   qaPanelOpen = true;
   qaPanelEl.style.display = "block";
 }
@@ -132,17 +173,3 @@ function closeQaPanel() {
   qaPanelOpen = false;
   qaPanelEl.style.display = "none";
 }
-function toggleQaPanel() {
-  if (qaPanelOpen) closeQaPanel();
-  else openQaPanel();
-}
-
-window.addEventListener("keydown", (e) => {
-  if (e.repeat) return;
-  if (e.code === "Backquote") {
-    e.preventDefault();
-    toggleQaPanel();
-  } else if (e.code === "Escape" && qaPanelOpen) {
-    closeQaPanel();
-  }
-});

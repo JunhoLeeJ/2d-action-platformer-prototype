@@ -115,9 +115,11 @@ function makeChaser(x, y, opts = {}) {
 // 완전히 동일하게 다룰 수 있다(타입 자체를 내부에서 검사하지 않는 함수라 가능). 새로 생기는 건
 // 유휴 손짓 애니메이션이 참고하는 aiState뿐 - 별도 타이머/위상 필드 없이 draw()가 performance.now()
 // (enemy.id로 위상만 개체별로 다르게)를 직접 읽어서 그린다(포탑 예고 pulse와 같은 패턴).
+// displayName: 사용자 요청으로 붙인 임시 이름("떠돌이") - 정식 명칭이 정해지기 전까지 코드/문서에서
+// "적 A" 대신 이걸로 부르기 위한 자리표시자일 뿐, 아직 이걸 실제로 렌더링하는 UI는 없음.
 function makeMimeA(x, y, opts = {}) {
   const chaser = makeChaser(x, y, opts);
-  return { ...chaser, type: "mimeA", hp: CONFIG.MIME_A_MAX_HP, maxHp: CONFIG.MIME_A_MAX_HP };
+  return { ...chaser, type: "mimeA", displayName: "떠돌이", hp: CONFIG.MIME_A_MAX_HP, maxHp: CONFIG.MIME_A_MAX_HP };
 }
 
 // 적 B(mimeB, 1층 구역 4)는 여기 없다 - "배경의 일부"일 뿐 enemies[]에 들어가는 실제 몬스터가
