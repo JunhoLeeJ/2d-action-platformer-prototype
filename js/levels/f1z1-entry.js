@@ -10,6 +10,12 @@
 // 남아서 캐릭터가 "붕 뜬" 것처럼 보인다.
 (function () {
   const groundY = 750, groundH = 40;
+  const doorH = 140;
+  // 서 있을 때 플레이어 상단 y (발이 groundY에 닿은 상태) - entryPoint/checkpoint/문 y를 여기서부터
+  // 계산해서 "땅에 닿기 전 살짝 공중에서 시작"(entryPoint를 어림수로 더 위에 잡았던 예전 실수)이나
+  // "문이 땅 속에 박혀 보임"(문 y를 이 값과 무관하게 따로 어림수로 잡았던 예전 실수) 둘 다 재발하지
+  // 않게 한다 - 매직 넘버 대신 항상 groundY/player.h로부터 도출.
+  const standingTopY = groundY - player.h;
 
   ZONES["f1z1_entry"] = {
     id: "f1z1_entry",
@@ -40,14 +46,23 @@
     ],
     enemySpawns: [],
 
-    entryPoint: { x: 40, y: 650 },
+    entryPoint: { x: 40, y: standingTopY },
     checkpoints: [
-      { id: "start", x: 40, y: 650, active: true },
+      { id: "start", x: 40, y: standingTopY, active: true },
     ],
 
     doors: {
-      left: { x: 40, y: 630, w: 40, h: 140 }, // 배경일 뿐, 트리거 없음 - 벽(0~40) 바로 뒤에 위치
-      right: { x: 1520, y: 630, w: 40, h: 140, targetZoneId: "f1z2_platforms" },
+      left: { x: 40, y: groundY - doorH, w: 40, h: doorH }, // 배경일 뿐, 트리거 없음 - 벽(0~40) 바로 뒤, 바닥에 딱 맞닿게(sunk 방지)
+      // yMax: standingTopY보다 살짝만 여유(25px) - 점프로 문보다 훨씬 높이 뜬 채로 X만 맞아도
+      // 발동해버리던 버그(§ zones.js의 makeDoorTrigger) 수정. 땅바닥 존이라 yMin은 안 둠(문 위로
+      // "훨씬 높은 곳에서 진입"할 이유 자체가 없음 - f1z2_platforms처럼 착지대가 따로 있는 존과 다름).
+      // landingY: groundY - 모든 문에 공통으로 반드시 넣는 값(CLAUDE.md 참고). 점프해서 아직 공중인
+      // 채로 트리거에 걸리면(!player.onGround) 즉시 암전 대신 제자리 낙하(여기선 땅바닥까지)->오른쪽
+      // 으로 걸어 화면 밖으로 사라짐->암전 순으로 이어붙는다 - 땅바닥 문이라고 예외를 두지 않는다.
+      right: {
+        x: 1520, y: groundY - doorH, w: 40, h: doorH,
+        targetZoneId: "f1z2_platforms", yMax: standingTopY + 25, landingY: groundY,
+      },
     },
 
     triggerZones: [],

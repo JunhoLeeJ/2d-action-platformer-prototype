@@ -16,6 +16,16 @@
      fade({color, outDuration, holdDuration, inDuration, onMidpoint}) - 암전/화이트아웃, 완전히 어두운
                                        순간(onMidpoint)에 배경/위치를 바꿔치기할 수 있음
      callback({fn})                  - 그 프레임에 즉시 실행하고 바로 다음으로
+     custom({tick, onStart})         - 매 프레임 tick(dt)를 호출, true를 반환하면 다음 이벤트로 진행.
+                                       gameState==="cutscene"이라 updatePlayer가 안 도는 동안 임시로
+                                       물리 흉내(낙하 등)를 내야 하는 등, 정해진 지속시간이 아니라
+                                       "조건이 될 때까지" 기다려야 하는 연출에 씀(zones.js의 문 착지
+                                       연출 참고). onStart는 이벤트 진입 시 한 번만 실행.
+
+   트리거의 sequence는 고정 배열 대신 함수(() => events)로 줄 수도 있다 - 트리거가 실제로 발동하는
+   순간(fireTrigger)에 그때그때 다시 평가되므로, 존 로드 시점에는 알 수 없는 "발동 시점의 게임 상태"에
+   따라 다른 이벤트 목록을 고를 수 있다(예: 문에 공중에서 진입했는지 여부 - zones.js의 makeDoorTrigger
+   참고). 정적 배열을 주면 지금까지와 동일하게 그대로 재생된다.
 
    모든 시퀀스는 반드시 endSequence() 한 곳으로 수렴한다 - 카메라 오버라이드 해제, 텍스트박스 숨김이
    여기 한 군데에만 있어서 "재생하다 만 채로 걸린" 상태가 구조적으로 불가능하다. 시퀀스 도중에는
@@ -107,6 +117,9 @@ function runEvent(ev) {
       if (ev.fn) ev.fn();
       advanceSequence();
       break;
+    case "custom":
+      if (ev.onStart) ev.onStart();
+      break; // 진행은 updateSequence의 tick(dt) 결과에 달림 - 여기선 그냥 시작만
     default:
       console.warn("[cutscene] unknown event type", ev.type);
       advanceSequence();
@@ -133,6 +146,11 @@ function updateSequence(dt) {
       endFade();
       advanceSequence();
     }
+    return;
+  }
+
+  if (ev.type === "custom") {
+    if (ev.tick(dt)) advanceSequence();
     return;
   }
 
@@ -183,7 +201,9 @@ function endSequence() {
 function fireTrigger(trigger, zoneId) {
   const key = zoneId + ":" + trigger.id;
   if (!trigger.repeatable) seenTriggerIds.add(key);
-  startSequence(trigger.sequence);
+  // sequence는 고정 배열이거나, 발동 시점에 평가할 함수일 수 있다(§ 위 이벤트 타입 설명 참고).
+  const events = typeof trigger.sequence === "function" ? trigger.sequence() : trigger.sequence;
+  startSequence(events);
 }
 
 // loadZone()이 새 존을 세팅한 직후 호출 - 그 존에 아직 재생 안 한 kind:"auto" 트리거가 있으면 튼다.

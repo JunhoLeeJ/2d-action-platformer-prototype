@@ -15,6 +15,10 @@ const RULE_FLAG_DEFAULTS = {
   disableDrift: false,
   playerInvincible: false, // true면 damagePlayer()가 아예 등록을 안 함(피격 유예 화면 효과도 안 뜸)
   hpFloor: null,            // 숫자를 넣으면 applyDamageToHp가 HP를 그 이하로 못 내림 (죽지 않는 구간용)
+  // 숫자를 넣으면 이 존 안의 플레이어 + 모든 몬스터가 마지막 피격 후 이 시간(sec)만큼 안 맞으면
+  // 즉시(스냅) 최대 체력으로 회복된다 (tickHpRegen, enemies.js) - hpFloor와는 독립된 별개의 레버라,
+  // "안 죽는다"와 "회복된다"를 존마다 따로 켜고 끌 수 있다. null이면 완전히 비활성.
+  hpRegenDelay: null,
   hideGhostNpc: false,      // 1층은 동료 없이 혼자라는 설정이라(원작 스펙 "npc는 1층에서는 존재하지 않음") 유령 동료도 숨김
 };
 function getRuleFlag(name) {
@@ -90,32 +94,88 @@ function isGateBlocking(gate, rect) {
   return isGateLocked(gate) && rect.x + rect.w > gate.x && rect.x < gate.x + gate.w;
 }
 
+// 문에서 아직 착지 못 한 채(공중에서) 트리거에 걸린 경우 전용 - 조작권을 뺏은 채 제자리(가로 고정)에서
+// landingY까지 중력만 적용해 떨어뜨린다. gameState가 "cutscene"이라 updatePlayer 자체가 안 도는 동안엔
+// 중력도 안 걸리므로, 이 틱 함수가 그동안 대신 최소한의 낙하 물리를 흉내낸다 - 착지하면 true를 반환해
+// 다음 이벤트(오른쪽으로 걸어나가기)로 넘어간다.
+function makeFallInPlaceTick(landingY) {
+  return function fallInPlaceTick(dt) {
+    player.vx = 0;
+    player.vy += CONFIG.GRAVITY * dt;
+    if (player.vy > CONFIG.MAX_FALL_SPEED) player.vy = CONFIG.MAX_FALL_SPEED;
+    player.y += player.vy * dt;
+    // 트리거가 발동한 순간 아직 상승 중(이단 점프 관성)이었다면, 여기서도 천장에 막혀야 한다 -
+    // updatePlayer와 완전히 같은 판정을 재사용(player.js 참고. 안 그러면 이 틱 동안은 순수 낙하만
+    // 흉내내느라 충돌을 아예 안 봐서 천장을 뚫고 올라가 버림 - 실제로 발견된 버그).
+    resolveSolidVerticalCollisions();
+    if (player.y + player.h >= landingY) {
+      player.y = landingY - player.h;
+      player.vy = 0;
+      player.onGround = true;
+      player.jumpsUsed = 0;
+      player.airAttacksUsed = 0;
+      return true;
+    }
+    return false;
+  };
+}
+
+// 착지 후 이어지는 두 번째 단계 - 오른쪽으로 걸어 화면(카메라 뷰) 밖으로 사라질 때까지.
+// 벽 충돌 등 평소 이동 판정은 일부러 안 거친다 - 이미 문을 쓰는 연출 중이라 실제 지형과는 무관하게
+// 화면 밖으로 빠져나가는 것 자체가 목적.
+function walkRightOffscreenTick(dt) {
+  player.vx = CONFIG.MOVE_SPEED;
+  player.x += player.vx * dt;
+  return player.x > camera.x + W;
+}
+
 // 오른쪽 문(doors.right)을 "걸어 들어가면 페이드 후 다음 존으로 이동"하는 트리거로 변환.
 // 문 자체는 zone def에 좌표만 갖고 있고, 실제 동작(페이드/존 전환)은 여기서 조립한다 - 그래야
 // 모든 존이 "문에 닿으면 이렇게 된다"를 똑같이 공유하고 존 데이터에는 목적지만 적으면 된다.
+//
+// door.yMin/yMax(선택) - 트리거 자체의 Y 범위 제한. 문이 땅바닥이 아니라 높은 착지대 위에 있는 존
+// (예: f1z2_platforms)에서, X 범위만 보면 그 아래 땅바닥을 그냥 걸어가도 발동해버리는 문제를 막는다.
+// yMin은 비워두면(undefined) 위쪽 제한 없음 - 점프로 착지대보다 훨씬 높이 떠서 들어와도 발동은 되어야
+// 하므로(§ 아래 landingY 분기가 그 경우를 자연스럽게 처리) 일부러 안 좁힘. yMax만 타이트하게 잡아서
+// 땅바닥처럼 훨씬 아래에 있는 위치는 제외한다.
+//
+// door.landingY(선택) - 이 문에 대응하는 착지대의 표면 y. 있으면 트리거 발동 시점에 플레이어가 아직
+// 공중(!player.onGround)이었는지 확인해서, 공중이면 즉시 암전하는 대신 제자리 낙하->오른쪽으로 걸어
+// 화면 밖으로 사라짐->암전 순서로 이어붙인 시퀀스를 재생한다(공중에서 갑자기 얼어붙은 채 바로
+// 암전되는 어색함을 없애기 위함). 이미 착지한 채(onGround) 걸어 들어온 경우는 기존과 동일하게 즉시 암전.
 function makeDoorTrigger(door) {
+  const transitionFade = {
+    type: "fade",
+    color: "#000",
+    outDuration: 0.4,
+    holdDuration: 0.15,
+    inDuration: 0.4,
+    onMidpoint: () => {
+      // 문을 넘는 도중 스윙/표류가 걸려있었다면, 페이드가 끝나고 새 존의 지형을 기준으로
+      // 그 판정이 어긋난 채 이어지지 않도록 여기서 확실히 정리한다.
+      cancelInFlightCombatState();
+      const target = ZONES[door.targetZoneId];
+      loadZone(door.targetZoneId, target.entryPoint);
+    },
+  };
   return {
     id: "__door_right",
     kind: "walkIn",
     xMin: door.x,
     xMax: door.x + door.w,
+    yMin: door.yMin,
+    yMax: door.yMax,
     repeatable: true, // 문은 일회성 스토리 비트가 아니라 언제든 다시 써야 하는 오브젝트라서
-    sequence: [
-      {
-        type: "fade",
-        color: "#000",
-        outDuration: 0.4,
-        holdDuration: 0.15,
-        inDuration: 0.4,
-        onMidpoint: () => {
-          // 문을 넘는 도중 스윙/표류가 걸려있었다면, 페이드가 끝나고 새 존의 지형을 기준으로
-          // 그 판정이 어긋난 채 이어지지 않도록 여기서 확실히 정리한다.
-          cancelInFlightCombatState();
-          const target = ZONES[door.targetZoneId];
-          loadZone(door.targetZoneId, target.entryPoint);
-        },
-      },
-    ],
+    // 트리거가 실제로 발동하는 시점(fireTrigger)에 그때의 player.onGround를 보고 매번 새로 구성한다 -
+    // 정적 배열이면 존 로드 시점에 한 번 고정되어 버려서 발동 시점의 상태를 반영할 수 없다.
+    sequence: () => {
+      if (door.landingY == null || player.onGround) return [transitionFade];
+      return [
+        { type: "custom", tick: makeFallInPlaceTick(door.landingY) },
+        { type: "custom", tick: walkRightOffscreenTick },
+        transitionFade,
+      ];
+    },
   };
 }
 

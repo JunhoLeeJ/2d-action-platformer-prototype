@@ -13,12 +13,17 @@ const player = {
   airAttacksUsed: 0, // 착지 전까지 쓴 공중 공격 횟수 - jumpsUsed와 동일하게 착지 시에만 0으로 리셋 (MAX_AIR_ATTACKS 참고)
 
   hp: CONFIG.PLAYER_MAX_HP,
+  maxHp: CONFIG.PLAYER_MAX_HP, // tickHpRegen(enemies.js)이 플레이어/몬스터에 공통으로 쓰는 최소 인터페이스({hp,maxHp,timeSinceHit}) 충족용
   invincibleTimer: 0,
+  timeSinceHit: Infinity, // 마지막으로 HP가 실제로 깎인 뒤 흐른 시간 (sec) - tickHpRegen이 이 값으로 회복 시작 여부를 판단
 
   attackState: "idle",     // idle | active | recovery
   attackTimer: 0,
   hitEnemiesThisSwing: new Set(),
   attackIsAirborne: false, // 이번 스윙이 공중 공격인지 (startAttack 시점의 onGround로 고정, getAttackHitbox/draw에서 참고)
+  // 지상 공격 후딜레이(recovery)가 끝난 직후에도 아주 짧게 한 번 더 이동을 막는 타이머(sec) - 0보다
+  // 크면 movement 블록이 A/D 입력을 무시한다. GROUND_ATTACK_POST_RECOVERY_LOCK_DURATION 참고.
+  postAttackLockTimer: 0,
 
   state: "anchor",         // anchor | drift - 피격 판정에는 영향 없음, "데미지를 축적할지 즉시 적용할지"만 바꾸는 레이어
   driftTimer: 0,           // drift 상태로 진입한 시점부터 DRIFT_DURATION에서 카운트다운, 0이 되면 자동 종료+반격
@@ -64,17 +69,27 @@ function updateGhostNpc(dt) {
 
 function startAttack() {
   player.attackState = "active";
-  player.attackTimer = CONFIG.ATTACK_ACTIVE_DURATION;
   player.hitEnemiesThisSwing.clear();
-  // 스윙 시작 시점의 접지 상태로 고정 - 활성 시간이 0.08초뿐이라 도중에 이/착지해도 스윙 종류가
-  // 안 바뀌게 함(모양/데미지가 프레임 중간에 바뀌면 시각효과와 판정이 어긋나 보임).
+  // 스윙 시작 시점의 접지 상태로 고정 - 도중에 이/착지해도 스윙 종류가 안 바뀌게 함(모양/데미지가
+  // 프레임 중간에 바뀌면 시각효과와 판정이 어긋나 보임). attackTimer 분기보다 먼저 정해야 함.
   player.attackIsAirborne = !player.onGround;
+  player.attackTimer = player.attackIsAirborne ? CONFIG.ATTACK_ACTIVE_DURATION : CONFIG.GROUND_ATTACK_ACTIVE_DURATION;
+  // 이전 스윙이 남긴 후속 이동잠금은 이번 스윙 자신의 잠금(active의 쏠림 + recovery의 정지)이 곧바로
+  // 이어받으므로 더 이상 의미가 없다 - 새 스윙 시작 시 확실히 정리.
+  player.postAttackLockTimer = 0;
 }
 
 // 공중 공격 데미지 = 지상 공격(ATTACK_DAMAGE)의 절반. 상수로 다시 박지 않고 항상 지상 공격을 따라가도록
 // 함수화 (getDriftCooldownOnCounter/Whiff와 같은 이유 - CONFIG.ATTACK_DAMAGE가 바뀌어도 관계가 자동 유지됨).
 function getAirAttackDamage() {
   return CONFIG.ATTACK_DAMAGE / 2;
+}
+
+// 지상 공격 스윙 중 몸이 앞으로 쏠리는 속도 - 총 이동 거리(GROUND_ATTACK_LUNGE_DISTANCE)를 활성
+// 시간으로 나눠서 매번 계산한다(상수로 속도를 직접 박지 않는 이유는 getDriftCooldownOnCounter/Whiff와
+// 같음 - GROUND_ATTACK_ACTIVE_DURATION을 조정해도 "총 쏠리는 거리"라는 의도가 자동으로 유지됨).
+function getGroundAttackLungeSpeed() {
+  return CONFIG.GROUND_ATTACK_LUNGE_DISTANCE / CONFIG.GROUND_ATTACK_ACTIVE_DURATION;
 }
 
 // 지상 공격 판정 (facing 방향으로 플레이어 옆에 배치되는 사각형). 공중 공격은 방향 무관 원형이라
@@ -106,10 +121,12 @@ function respawnPlayer() {
   player.vx = 0;
   player.vy = 0;
   player.hp = CONFIG.PLAYER_MAX_HP;
+  player.timeSinceHit = Infinity;
   player.jumpsUsed = 0;
   player.airAttacksUsed = 0;
   player.invincibleTimer = CONFIG.HIT_INVINCIBILITY_DURATION * 0.5;
   player.attackState = "idle";
+  player.postAttackLockTimer = 0;
   player.state = "anchor";
   player.driftTimer = 0;
   player.driftCooldownTimer = 0;
@@ -120,15 +137,46 @@ function respawnPlayer() {
   gameState = "playing";
 }
 
+// 고정형 플랫폼(solidPlatforms) 세로 충돌 판정 - 위에서 착지(vy>0)/아래에서 부딪힘(vy<0) 둘 다 막힘.
+// updatePlayer의 Y축 처리와 zones.js의 문 착지 연출(공중에서 문에 진입했을 때의 제자리 낙하)이
+// 이 로직을 공유한다 - 후자는 gameState==="cutscene"이라 updatePlayer 자체가 안 도는 동안 스스로
+// 중력을 흉내내야 하는데, 그때도 천장 같은 solidPlatforms 항목에는 똑같이 부딪혀야 한다 - 안 그러면
+// 트리거 발동 직전 이단 점프로 상승 중이던 관성이 그대로 이어져 천장을 뚫고 올라가 버린다(실제로
+// 발견된 버그 - 함수로 공유해서 두 곳의 판정이 어긋날 일이 없게 함).
+function resolveSolidVerticalCollisions() {
+  for (const s of currentZone.solidPlatforms) {
+    if (rectsOverlap(player, s)) {
+      if (player.vy > 0) {
+        player.y = s.y - player.h;
+        player.vy = 0;
+        player.onGround = true;
+        player.jumpsUsed = 0;
+        player.airAttacksUsed = 0;
+      } else if (player.vy < 0) {
+        player.y = s.y + s.h;
+        player.vy = 0;
+      }
+    }
+  }
+}
+
 function updatePlayer(dt) {
   // --- 타이머 ---
   if (player.invincibleTimer > 0) player.invincibleTimer -= dt;
+  tickHpRegen(player, dt);
+  if (player.postAttackLockTimer > 0) player.postAttackLockTimer -= dt;
 
   // --- 조준 방향: 이동 방향과 무관하게, 매 프레임 마우스 커서가 있는 쪽을 향하도록 갱신.
   // 근접 공격 판정(getAttackHitbox)이 이 값을 그대로 쓰기 때문에 "왼쪽으로 이동 중이어도
   // 커서가 오른쪽이면 오른쪽을 공격"이 자동으로 성립한다. (표류 반격은 방향 무관 - 플레이어
   // 중심 광역 판정이라 facing을 안 쓴다. performDriftCounterAttack 참고)
-  player.facing = getMouseWorldX() < player.x + player.w / 2 ? -1 : 1;
+  // 단, 지상 공격이 활성(active) 상태인 동안은 갱신을 건너뛴다 - 스윙 도중 마우스를 반대편으로
+  // 빠르게 옮겨도 판정/돌진 방향이 시작 시점 그대로 유지되게 하기 위함(공중 공격은 원래 방향
+  // 무관한 원형 판정이라 영향 없음). 공격을 누른 바로 그 프레임엔 attackState가 아직 이전 프레임의
+  // 값("idle")이라 정상적으로 갱신되고, 그다음 프레임부터 얼어붙는다.
+  if (!(player.attackState === "active" && !player.attackIsAirborne)) {
+    player.facing = getMouseWorldX() < player.x + player.w / 2 ? -1 : 1;
+  }
 
   // --- 표류 입력 (단발 - 우클릭 한 번으로 발동, 홀드/뗄 때 입력 불필요) ---
   // driftUnlocked: 스토리상 특정 지점(구역 5 재방문)까지는 표류 자체가 잠겨있어야 하는 전역 게이트.
@@ -140,9 +188,15 @@ function updatePlayer(dt) {
   updateDrift(dt);
 
   // --- 좌우 이동 (A/D) ---
+  // postAttackLockTimer > 0인 동안은 입력 자체를 무시한다(지상 공격 후딜레이가 끝난 직후의 짧은
+  // 여유시간 - GROUND_ATTACK_POST_RECOVERY_LOCK_DURATION 참고). 스윙의 active/recovery 상태 자체는
+  // 여기서 안 막아도 된다 - 아래 공격 처리 블록이 이동 입력 처리 "이후"에 실행되며 그 두 상태 동안의
+  // vx를 각각 쏠림/정지로 덮어쓰므로, 여기서 계산한 move가 어차피 무시된다.
   let move = 0;
-  if (heldKeys["KeyA"]) move -= 1;
-  if (heldKeys["KeyD"]) move += 1;
+  if (player.postAttackLockTimer <= 0) {
+    if (heldKeys["KeyA"]) move -= 1;
+    if (heldKeys["KeyD"]) move += 1;
+  }
   player.vx = move * CONFIG.MOVE_SPEED;
   if (move !== 0) playerLastMoveDir = move; // 유령 NPC가 "진행 방향 반대편"을 계산할 때 씀 - 제자리에 서면 이전 방향 유지
 
@@ -175,6 +229,13 @@ function updatePlayer(dt) {
   }
   if (player.attackState === "active") {
     player.attackTimer -= dt;
+    // 지상 공격 전용 돌진: 이동 입력을 무시하고 매 프레임 강제로 facing 방향 속도를 덮어써서
+    // "몸이 앞으로 쏠리는" 연출 + 그 짧은 순간의 조작 불능을 만든다. 이 블록이 이동 입력 처리
+    // (player.vx = move * MOVE_SPEED) 이후, X축 이동 적용 이전에 실행되므로 A/D를 누르고
+    // 있었어도 그대로 덮어써진다. active 상태를 벗어나는 즉시(recovery 진입) 다시 정상 입력을 따름.
+    if (!player.attackIsAirborne) {
+      player.vx = player.facing * getGroundAttackLungeSpeed();
+    }
     const hitbox = player.attackIsAirborne ? null : getAttackHitbox();
     const airCx = player.x + player.w / 2, airCy = player.y + player.h / 2;
     const damage = player.attackIsAirborne ? getAirAttackDamage() : CONFIG.ATTACK_DAMAGE;
@@ -185,33 +246,27 @@ function updatePlayer(dt) {
         ? circleRectOverlap(airCx, airCy, CONFIG.AIR_ATTACK_RADIUS, enemy)
         : rectsOverlap(hitbox, enemy);
       if (hit) {
-        enemy.hp -= damage;
-        enemy.flashTimer = 0.12;
+        damageEnemy(enemy, damage);
         player.hitEnemiesThisSwing.add(enemy.id);
-        // 스턴: 맞으면 공격 준비 상태를 초기화 - 계속 때리면 영원히 공격을 못 하게 됨.
-        // stunnable이 false인 몬스터(보라색)는 이 효과에서 제외.
-        if (enemy.stunnable) {
-          if (enemy.type === "chaser") {
-            if (enemy.aiState === "windup") {
-              enemy.aiState = "chase"; // 근접 공격 선딜레이 캔슬 - 다시 다가와서 처음부터 다시 예고해야 함
-              enemy.attackTimer = 0;
-            }
-            enemy.stunTimer = CONFIG.CHASER_STUN_DURATION; // 이 시간 동안은 사거리 안이어도 재진입 불가
-          } else {
-            enemy.fireTimer = CONFIG.TURRET_FIRE_INTERVAL;
-            enemy.telegraphing = false;
-          }
-        }
-        if (enemy.hp <= 0) enemy.alive = false;
       }
     }
     if (player.attackTimer <= 0) {
       player.attackState = "recovery";
-      player.attackTimer = CONFIG.ATTACK_RECOVERY_DURATION;
+      player.attackTimer = player.attackIsAirborne ? CONFIG.ATTACK_RECOVERY_DURATION : CONFIG.GROUND_ATTACK_RECOVERY_DURATION;
     }
   } else if (player.attackState === "recovery") {
     player.attackTimer -= dt;
-    if (player.attackTimer <= 0) player.attackState = "idle";
+    // 지상 공격 후딜레이: "검을 휘두른 뒤 잠깐 멈춰서기" - 이동 입력과 무관하게 완전히 멈춘다.
+    // 공중 공격은 후딜레이 중에도 자유롭게 움직일 수 있는 기존 동작을 그대로 유지(건드리지 않음).
+    if (!player.attackIsAirborne) player.vx = 0;
+    if (player.attackTimer <= 0) {
+      player.attackState = "idle";
+      // 후딜레이가 끝난 직후에도 아주 짧게 한 번 더 이동을 막는다 - 연타(재공격)하지 않았다면 이
+      // 여유시간이 다 지나야 자유롭게 움직일 수 있다. 곧바로 다시 공격하면(재공격은 attackState가
+      // "idle"이기만 하면 언제든 가능) 이 타이머가 채 끝나기 전에 startAttack()이 0으로 리셋하고
+      // 새 스윙 자신의 잠금이 이어받으므로, 결과적으로 "연타 중엔 안 걸림"이 자동으로 성립한다.
+      if (!player.attackIsAirborne) player.postAttackLockTimer = CONFIG.GROUND_ATTACK_POST_RECOVERY_LOCK_DURATION;
+    }
   }
 
   // --- 이동 적용 + 충돌 처리 (X축, 고정형 플랫폼만 - 원웨이는 좌우로 막지 않음) ---
@@ -241,20 +296,7 @@ function updatePlayer(dt) {
   player.onGround = false;
 
   // 고정형 플랫폼: 위에서 착지 + 아래에서 점프 시 머리가 부딪힘 (양방향 모두 막힘)
-  for (const s of currentZone.solidPlatforms) {
-    if (rectsOverlap(player, s)) {
-      if (player.vy > 0) {
-        player.y = s.y - player.h;
-        player.vy = 0;
-        player.onGround = true;
-        player.jumpsUsed = 0;
-        player.airAttacksUsed = 0;
-      } else if (player.vy < 0) {
-        player.y = s.y + s.h;
-        player.vy = 0;
-      }
-    }
-  }
+  resolveSolidVerticalCollisions();
 
   // 원웨이(관통형) 플랫폼: 오직 "위에서 떨어져 착지"할 때만 막힘.
   // 아래에서 위로 통과하거나(vy < 0), 이미 플랫폼 아래에 있던 경우는 그대로 통과시킴.
@@ -310,6 +352,7 @@ function getDriftCooldownOnWhiff() {
 // damagePlayer()에서 곧바로 주지 않는 이유: 대기 중인(pending) 피해는 아직 "맞은 것으로 확정"되지 않았기 때문.
 function applyDamageToHp(amount) {
   player.hp -= amount;
+  player.timeSinceHit = 0; // 회복 타이머 리셋 (tickHpRegen) - 표류 자해로 깎일 때도 동일하게 적용됨
   // hpFloor: 존 규칙으로 "이 이하로는 안 죽는다"가 걸려있으면 여기서 바닥을 친다 - 0 이하 분기가
   // 구조적으로 도달 불가능해지므로 별도의 "죽지 않음" 플래그가 따로 필요 없다.
   const floor = getRuleFlag("hpFloor");
@@ -339,21 +382,7 @@ function applyCounterDamageToEnemies(hitbox, amount) {
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
     if (!rectsOverlap(hitbox, enemy)) continue;
-    enemy.hp -= amount;
-    enemy.flashTimer = 0.12;
-    if (enemy.stunnable) {
-      if (enemy.type === "chaser") {
-        if (enemy.aiState === "windup") {
-          enemy.aiState = "chase";
-          enemy.attackTimer = 0;
-        }
-        enemy.stunTimer = CONFIG.CHASER_STUN_DURATION;
-      } else {
-        enemy.fireTimer = CONFIG.TURRET_FIRE_INTERVAL;
-        enemy.telegraphing = false;
-      }
-    }
-    if (enemy.hp <= 0) enemy.alive = false;
+    damageEnemy(enemy, amount);
   }
 }
 

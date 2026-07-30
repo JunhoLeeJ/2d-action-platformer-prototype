@@ -36,6 +36,8 @@ function makeTurret(x, y, opts = {}) {
     flashTimer: 0,
     hasBeenVisible: false, // 카메라 화면 안에 한 번이라도 들어온 적 있는지 (아직 없으면 발사 금지)
     stunnable, // false면 근접 공격을 맞아도 발사 타이머가 초기화되지 않음 (스턴 면역, 보라색으로 표시)
+    hpFloor: opts.hpFloor ?? null, // 숫자를 넣으면 damageEnemy가 이 몬스터를 그 이하로 못 죽임(연습용 "안 죽는" 몬스터)
+    timeSinceHit: Infinity, // 마지막으로 damageEnemy에 맞은 뒤 흐른 시간 (sec) - tickHpRegen이 이 값으로 회복 시작 여부를 판단 (player.timeSinceHit와 동일한 개념)
     ...makeStationaryRangeFields(),
   };
 }
@@ -59,6 +61,8 @@ function makeSniper(x, y, opts = {}) {
     flashTimer: 0,
     hasBeenVisible: false,
     stunnable,
+    hpFloor: opts.hpFloor ?? null,
+    timeSinceHit: Infinity,
     ...makeStationaryRangeFields(),
   };
 }
@@ -91,6 +95,8 @@ function makeChaser(x, y, opts = {}) {
     flashTimer: 0,
     hasBeenVisible: false,
     stunnable,
+    hpFloor: opts.hpFloor ?? null,
+    timeSinceHit: Infinity,
     // "적 공통" 범위 필드 (CONFIG 주석 참고) - updateChaserAI/getChaserAttackHitbox가 CONFIG.CHASER_*를
     // 직접 읽지 않고 이 인스턴스 필드를 읽는다. leashRangeH는 체이서가 원래 세로 어그로 범위가 따로
     // 없었으므로(가로 거리만 봄) Infinity로 둬서 그 원래 동작을 그대로 유지.
@@ -111,6 +117,50 @@ const ENEMY_FACTORIES = { turret: makeTurret, sniper: makeSniper, chaser: makeCh
 // 시도의 상태가 새 존으로 새어 들어올 여지가 구조적으로 없다.
 const enemies = [];
 const projectiles = []; // {x,y,vx,vy,r,damage}
+
+// 몬스터에게 피해를 적용하는 유일한 지점 - 평소 근접 공격(updatePlayer의 공격 판정 블록)과 표류 반격
+// (applyCounterDamageToEnemies)이 둘 다 이 함수를 공유한다. 스턴 처리와 사망 판정이 두 곳에 따로
+// 중복되어 있던 걸 하나로 합친 것 - hpFloor(1층 구역 3 연습용 "안 죽는" 몬스터, player의 hpFloor
+// 규칙과 같은 개념이지만 존 전체가 아니라 개별 몬스터 단위) 로직도 추가할 자리가 한 곳뿐이면 되게 함.
+function damageEnemy(enemy, amount) {
+  enemy.hp -= amount;
+  enemy.flashTimer = 0.12;
+  enemy.timeSinceHit = 0; // 회복 타이머 리셋 (tickHpRegen) - player.applyDamageToHp와 동일한 훅 지점 역할
+  // 스턴: 맞으면 공격 준비 상태를 초기화 - 계속 때리면 영원히 공격을 못 하게 됨.
+  // stunnable이 false인 몬스터(보라색)는 이 효과에서 제외.
+  if (enemy.stunnable) {
+    if (enemy.type === "chaser") {
+      if (enemy.aiState === "windup") {
+        enemy.aiState = "chase"; // 근접 공격 선딜레이 캔슬 - 다시 다가와서 처음부터 다시 예고해야 함
+        enemy.attackTimer = 0;
+      }
+      enemy.stunTimer = CONFIG.CHASER_STUN_DURATION; // 이 시간 동안은 사거리 안이어도 재진입 불가
+    } else {
+      enemy.fireTimer = CONFIG.TURRET_FIRE_INTERVAL;
+      enemy.telegraphing = false;
+    }
+  }
+  if (enemy.hp <= 0) {
+    // hpFloor가 있으면 그 값에서 멈추고 죽지 않는다 - HP가 깎이는 티는 그대로 나되(핍이 거의 빔)
+    // 실제로 죽지는 않아야 하는 연습용 몬스터용 (fragmentObject/reachingEntity와는 무관한 개념).
+    if (enemy.hpFloor != null) enemy.hp = enemy.hpFloor;
+    else enemy.alive = false;
+  }
+}
+
+// 범용 즉시(스냅) 체력 회복 - 플레이어(player.js의 updatePlayer)와 몬스터(아래 updateEnemies) 둘 다
+// 이 함수 하나를 공유한다. entity는 {hp, maxHp, timeSinceHit} 셋만 있으면 되는 최소 인터페이스라,
+// 나중에 회복이 필요한 다른 개체가 생겨도 그대로 재사용 가능. "천천히 차오름"이 아니라 지연시간이
+// 지나는 즉시 풀피로 스냅되는 이유는 의도적 - 회복 여부/시점을 존 규칙(ruleFlags.hpRegenDelay,
+// zones.js) 하나로 켜고 끌 수 있게 해서, 이후 난이도 조절에 이 값만 만지면 되도록 하기 위함.
+function tickHpRegen(entity, dt) {
+  const delay = getRuleFlag("hpRegenDelay");
+  if (delay == null) return;
+  entity.timeSinceHit += dt;
+  if (entity.timeSinceHit >= delay && entity.hp < entity.maxHp) {
+    entity.hp = entity.maxHp;
+  }
+}
 
 function getChaserAttackHitbox(enemy) {
   const w = enemy.attackRangeW, h = enemy.attackRangeH;
@@ -269,6 +319,8 @@ function updateEnemies(dt) {
     if (enemy.flashTimer > 0) enemy.flashTimer -= dt;
     if (!enemy.alive) continue;
     if (gameState !== "playing") continue;
+
+    tickHpRegen(enemy, dt); // hpRegenDelay가 걸린 존(f1z3 등)에서만 실제로 발동 - 그 외엔 즉시 return
 
     // 화면에 한 번이라도 들어온 적이 있는지 기록 (한 번 보이고 나면 이후 화면 밖으로 나가도 계속 유지).
     // 단, 봉쇄 벽 너머의 몬스터는 벽이 잠긴 동안은 화면에 보여도 "안 보인 것"으로 취급.

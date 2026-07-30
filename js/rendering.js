@@ -315,16 +315,21 @@ const respawnMsg = document.getElementById("respawnMsg");
 
 function updateHud() {
   const hpRatio = clamp(player.hp / CONFIG.PLAYER_MAX_HP, 0, 1);
-  hpBarInner.style.width = (hpRatio * 100) + "%";
-  hpText.textContent = `HP ${Math.max(0, player.hp)} / ${CONFIG.PLAYER_MAX_HP}`;
+  hpBarInner.style.width = (hpRatio * 100) + "%"; // 바는 실제 소수점 값 그대로 - 회복 중에도 매끄럽게 채워짐
+  // 텍스트는 정수로만 - HP가 소수점 단위(반칸 공중 공격 등)로 깎일 수 있어 그대로 보여주면
+  // "HP 3.4237 / 5"처럼 지저분해 보임. floor라서 아직 다 안 찬 값은 항상 실제보다 낮게(더
+  // 보수적으로) 보여줌 - 있지도 않은 체력을 있는 것처럼 보여주지 않기 위해. HP 회복(tickHpRegen)은
+  // 트리클이 아니라 즉시 스냅이라 이 값이 서서히 올라가다 마는 일은 없음(0 아니면 가득).
+  hpText.textContent = `HP ${Math.floor(Math.max(0, player.hp))} / ${CONFIG.PLAYER_MAX_HP}`;
 
   // 판정 활성(active) 중엔 항상 0% - 재사용 불가 구간이라 진행률을 보여줄 필요가 없음.
-  // recovery 진입부터 ATTACK_RECOVERY_DURATION을 기준으로 게이지가 차오름.
+  // recovery 진입부터 (지상/공중 각각의) 후딜레이 시간을 기준으로 게이지가 차오름.
   let atkRatio;
   if (player.attackState === "active") {
     atkRatio = 0;
   } else if (player.attackState === "recovery") {
-    atkRatio = 1 - clamp(player.attackTimer / CONFIG.ATTACK_RECOVERY_DURATION, 0, 1);
+    const recoveryDuration = player.attackIsAirborne ? CONFIG.ATTACK_RECOVERY_DURATION : CONFIG.GROUND_ATTACK_RECOVERY_DURATION;
+    atkRatio = 1 - clamp(player.attackTimer / recoveryDuration, 0, 1);
   } else {
     atkRatio = 1;
   }

@@ -11,6 +11,8 @@
 // 상대적인 지형 배치(플랫폼 간 높이차 등)는 원래와 완전히 동일 - 전부 같은 양만큼 이동했을 뿐.
 (function () {
   const groundY = 750, groundH = 40;
+  const doorH = 140;
+  const standingTopY = groundY - player.h; // 서 있을 때 플레이어 상단 y - entryPoint/checkpoint/문 y 계산에 사용
 
   ZONES["f2z3_legacy_arena"] = {
     id: "f2z3_legacy_arena",
@@ -80,15 +82,15 @@
       { type: "chaser", x: 2700, y: 706, opts: { patrolHalfRange: 80, stunnable: false } }, // 바닥 순찰 - 스턴 면역
     ],
 
-    entryPoint: { x: 40, y: 650 }, // 문으로 들어오거나 체크포인트가 없을 때 서는 기본 위치
+    entryPoint: { x: 40, y: standingTopY }, // 문으로 들어오거나 체크포인트가 없을 때 서는 기본 위치
     checkpoints: [
-      { id: "start", x: 40, y: 650, active: true },
+      { id: "start", x: 40, y: standingTopY, active: true },
     ],
 
     // 왼쪽 문은 배경일 뿐(트리거 없음 - 뒤로 못 감), 오른쪽 문은 아직 다음 존이 없어서 null.
-    // 벽(0~40) 바로 뒤에 위치하도록 x=40으로 안쪽에 둠.
+    // 벽(0~40) 바로 뒤에 위치하도록 x=40으로 안쪽에 둠. y는 바닥에 딱 맞닿게(sunk 방지) groundY-doorH.
     doors: {
-      left: { x: 40, y: 630, w: 40, h: 140 },
+      left: { x: 40, y: groundY - doorH, w: 40, h: doorH },
       right: null,
     },
 

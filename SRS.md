@@ -47,11 +47,13 @@
 
 ### FR-3. 근접 공격
 - FR-3.1 좌클릭(`justPressed["Mouse0"]`) 시, 공격 상태가 `idle`이면 `active`로 전환. 이 시점의 `player.onGround`로 `attackIsAirborne`이 고정되어, 스윙 도중 착지/이륙해도 종류가 안 바뀜(`startAttack`).
-- FR-3.2 (지상 공격) 방향은 `player.facing`을 그대로 씀 — 매 프레임 "마우스 커서가 플레이어 중심보다 왼쪽/오른쪽인지"로 갱신되며, 이동 입력과는 완전히 무관.
-- FR-3.3 (지상 공격) 판정 박스: 가로 85px×세로 75px(`ATTACK_RANGE_W/H`), `facing` 방향으로 플레이어 옆에 배치. 겹친 살아있는 적마다(한 스윙에 1회 한정) `ATTACK_DAMAGE`(1) 피해 + 스턴 적용.
+- FR-3.2 (지상 공격) 방향은 `player.facing`을 그대로 씀 — 매 프레임 "마우스 커서가 플레이어 중심보다 왼쪽/오른쪽인지"로 갱신되며, 이동 입력과는 완전히 무관. 단, 지상 공격이 `active` 상태인 동안은 이 갱신이 멈춘다(스윙을 시작한 프레임에 한 번 확정된 뒤 그대로 고정) — 스윙 도중 마우스를 반대편으로 빠르게 옮겨도 판정/돌진 방향이 시작 시점 그대로 유지됨. 공중 공격은 방향 무관 원형 판정이라 이 고정의 영향을 받지 않음.
+- FR-3.3 (지상 공격) 판정 박스: 가로 85px×세로 75px(`ATTACK_RANGE_W/H`), `facing` 방향으로 플레이어 옆에 배치하되 매 프레임 현재 `player.x`로 다시 계산됨(FR-3.3b의 돌진과 함께 앞으로 이동). 겹친 살아있는 적마다(한 스윙에 1회 한정) `ATTACK_DAMAGE`(1) 피해 + 스턴 적용.
 - FR-3.3a (공중 공격) `player.onGround`가 false일 때: 방향 무관, 플레이어 중심 기준 반지름 85px(`AIR_ATTACK_RADIUS`) 원형 판정(`circleRectOverlap`). 지상 공격(85×75)과 크기는 비슷하지만 방향 무관 원형이라 위/아래로 더 잘 닿고, 표류 반격(FR-6, 최대 리치 ~152px)보다는 확실히 좁음. 데미지는 지상 공격의 절반(`getAirAttackDamage()` = `ATTACK_DAMAGE/2` = 0.5) — 상수로 고정하지 않고 항상 `ATTACK_DAMAGE`에서 파생. 몬스터 HP는 부풀리지 않고 반칸(0.5) 단위 그대로 두며, 대신 체력 표시를 반칸 표현 가능한 마름모 pip로 바꿈(FR-9.1a/FR-10.1a, `drawHpPip`).
-- FR-3.4 활성 시간 0.08초(`ATTACK_ACTIVE_DURATION`) 동안 판정.
-- FR-3.5 활성 종료 후 후딜레이 0.30초(`ATTACK_RECOVERY_DURATION`) 동안 재공격 불가 (지상/공중 공통).
+- FR-3.3b (지상 공격 전용 돌진) `active` 상태인 동안 매 프레임 좌우 이동 입력을 무시하고 `player.vx`를 `player.facing × (GROUND_ATTACK_LUNGE_DISTANCE / GROUND_ATTACK_ACTIVE_DURATION)`(`getGroundAttackLungeSpeed()`)으로 강제 덮어씀 — "대시"가 아니라 검을 휘두른 반작용으로 몸이 아주 살짝(총 이동거리 `GROUND_ATTACK_LUNGE_DISTANCE`=10px) 쏠리는 정도. 속도가 아니라 총 이동거리로 정의되어 있어 활성 시간을 조정해도 쏠리는 거리 자체는 유지됨. 공중 공격은 영향 없음.
+- FR-3.4 활성 시간: 공중 공격은 0.08초(`ATTACK_ACTIVE_DURATION`), 지상 공격은 0.13초(`GROUND_ATTACK_ACTIVE_DURATION`, FR-3.3b의 돌진이 보이도록 살짝 늘림) 동안 판정.
+- FR-3.5 활성 종료 후 후딜레이: 공중 공격은 0.30초(`ATTACK_RECOVERY_DURATION`) 동안 재공격 불가하되 자유롭게 이동 가능(기존 동작 유지). 지상 공격은 0.30초(`GROUND_ATTACK_RECOVERY_DURATION`, 공중과 별개 상수) 동안 재공격 불가 + 좌우 이동도 완전히 멈춤(`player.vx=0` 강제) — "검을 휘두른 뒤 잠깐 멈춰서기".
+- FR-3.5a (지상 공격 전용 후속 잠금) `recovery`가 끝나 `attackState`가 `idle`로 돌아오는 순간, `player.postAttackLockTimer`가 `GROUND_ATTACK_POST_RECOVERY_LOCK_DURATION`(0.08s)로 설정되어 그 시간만큼 좌우 이동 입력이 한 번 더 무시된다("연타하지 않았다면 조금 더 있다가 움직일 수 있음"). `attackState==="idle"`이면 언제든 재공격이 가능하므로, 이 잠금 시간이 끝나기 전에 다시 좌클릭하면 `startAttack()`이 `postAttackLockTimer`를 0으로 리셋하고 새 스윙 자신의 잠금(FR-3.3b+본 항목)이 곧바로 이어받는다 — 즉 "연타 중엔 이 여유시간이 사실상 존재하지 않게" 되는 동작이 별도 분기 없이 자연히 성립함. 공중 공격은 이 잠금이 아예 설정되지 않음.
 - FR-3.6 숏홉(낮은 점프): 공격 입력이 `startAttack()`을 트리거하는 순간 `attackIsAirborne`이 true이면(타이밍 조건 없음, 매번) `player.vy`를 무조건 `-AIR_ATTACK_HOP_FORCE`(420)로 덮어쓴다. `jumpsUsed`를 소모/참조하지 않으므로 이단 점프를 다 쓴 뒤(`jumpsUsed=MAX_JUMPS`)에도 발동. 일반 점프(`JUMP_FORCE`=760, 최고 높이 ~137.5px) 대비 숏홉 최고 높이는 ~42px.
 - FR-3.7 공중 공격 횟수 제한: `player.airAttacksUsed`가 `CONFIG.MAX_AIR_ATTACKS`(1) 이상이면, 공중(`!player.onGround`)에서의 좌클릭은 `attackState==="idle"`이어도 `startAttack()` 자체가 호출되지 않음(스윙/판정/숏홉 전부 없음 - 점프 횟수를 다 쓰고 점프 입력을 누르는 것과 동일 취급). 지상 공격은 이 제한과 무관하게 항상 가능. `airAttacksUsed`는 공중 공격이 발동할 때마다 1 증가하고, `jumpsUsed`와 동일한 착지 판정 지점(고정형/원웨이 플랫폼 착지, 리스폰) 각각에서 0으로 리셋됨. 결과적으로 한 번 착지한 뒤 낼 수 있는 최대 상승 횟수는 점프(`MAX_JUMPS`=2) + 공중 공격(`MAX_AIR_ATTACKS`=1) = 3회(FR-3.6의 "사실상 3단 점프")로 고정되며, 착지 없이는 그 이상 불가능.
 
@@ -71,8 +73,8 @@
   - 합계 = 0 → `DRIFT_EMPTY_SELF_DAMAGE`(1)만큼 자해(`applyDamageToHp`), 쿨다운=`getDriftCooldownOnWhiff()`
   - 결과와 무관하게 이 시점에 `invincibleTimer = max(현재값, HIT_INVINCIBILITY_DURATION)` 부여
 - FR-5.5 표류 재발동 쿨다운은 상수가 아니라 계산값:
-  - `getDriftCooldownOnCounter() = HIT_INVINCIBILITY_DURATION + DRIFT_DAMAGE_GRACE_PERIOD + DRIFT_COOLDOWN_COUNTER_MARGIN(0.4)` → 현재 1.4초
-  - `getDriftCooldownOnWhiff() = getDriftCooldownOnCounter() + DRIFT_COOLDOWN_WHIFF_EXTRA(0.8)` → 현재 2.2초
+  - `getDriftCooldownOnCounter() = HIT_INVINCIBILITY_DURATION + DRIFT_DAMAGE_GRACE_PERIOD + DRIFT_COOLDOWN_COUNTER_MARGIN(0.4)` → 현재 1.5초
+  - `getDriftCooldownOnWhiff() = getDriftCooldownOnCounter() + DRIFT_COOLDOWN_WHIFF_EXTRA(0.8)` → 현재 2.3초
 - FR-5.6 시각 피드백: `drift` 상태 동안 화면 전체 파란 틴트. `pendingDamage`가 쌓여 있으면(=지금 끝나도 자해 대신 반격이 나감) 더 진한 파랑으로 구분.
 
 ### FR-6. 표류 반격
@@ -90,7 +92,7 @@
 - FR-7.5 화면 틴트: 원인별로 다른 색(damage=빨강 `rgba(255,23,23,·)`, counter=파랑 `rgba(41,121,255,·)`)을 잔여 비율(`timeStopTimer/timeStopDuration`)로 페이드.
 
 ### FR-8. 무적
-- FR-8.1 무적은 오직 `applyDamageToHp()` 호출 시점(HP가 실제로 깎이는 순간, 자해 포함)에만 부여 — `HIT_INVINCIBILITY_DURATION`(0.5s), 항상 `Math.max` 방식(기존 더 긴 무적을 줄이지 않음).
+- FR-8.1 무적은 오직 `applyDamageToHp()` 호출 시점(HP가 실제로 깎이는 순간, 자해 포함)에만 부여 — `HIT_INVINCIBILITY_DURATION`(0.6s), 항상 `Math.max` 방식(기존 더 긴 무적을 줄이지 않음).
 - FR-8.2 `finishDrift()`도 결과(반격/자해)와 무관하게 별도로 같은 값을 부여 — "이벤트 직후 무적시간"이 항상 동일 길이로 보장됨.
 - FR-8.3 무적 중엔 `damagePlayer()`의 최초 진입 가드(`invincibleTimer>0`)에 의해 새로운 피격이 아예 등록되지 않음.
 - FR-8.4 무적 중엔 타임스톱도 함께 멈춰있다가(FR-7.2), 타임스톱이 끝나는 시점부터 실제로 감소 시작 — 즉 "타임스톱 끝난 직후"부터 온전한 길이만큼 무적이 보장됨.
@@ -127,12 +129,13 @@
 - FR-11.3 봉쇄 벽(x=1900, `zone.wallGates`의 원소 1개): 벽보다 스폰 쪽(`spawnX<1900`)에 살아있는 적이 하나라도 있으면 잠김 — 플레이어/체이서 모두 통과 불가. 판정은 X 범위만 봄(`isGateBlocking`) - 세로 위치와 무관하게 항상 막혀서, 세로로 긴 존에서도 y/h를 따로 튜닝할 필요가 없음. 벽 너머 적은 벽이 잠긴 동안 "화면 밖"과 동일하게 플레이어를 인식하지 못함. 존 하나에 여러 게이트가 있을 수 있도록 일반화되어 있음(`isGateLocked`/`countAliveBehindGate`).
 - FR-11.4 존 왼쪽 끝에 배경용 문(트리거 없음, `doors.left`), 오른쪽 끝 문은 다음 존으로의 트리거를 가질 수 있으나(`doors.right`) 이 존은 아직 `null` — 다음 존이 콘텐츠로 아직 존재하지 않음. 모든 존 공통 관례: 좌우 끝은 `zone.walls`로 막혀있고(두께 40px), `doors.left`는 그 벽 바로 뒤(x=40)에 위치 - `doors.right`가 원래부터 존 끝에서 40px 안쪽에 있던 것과 같은 간격.
 - FR-11.5 `zone.floors`/`zone.walls`(이 존은 좌우 끝 벽 2개만 있고 `floors`는 비어있음)로 기본 바닥 외에 임의 위치의 추가 바닥/벽을 놓을 수 있음 - 각각 `gaps`로 구멍을 뚫어 여러 조각으로 쪼갠 뒤 `solidPlatforms`에 합쳐짐. `xMin`/`xMax`(floors)·`yMin`/`yMax`(walls)로 존 전체가 아니라 일부 구간에만 놓을 수도 있음(생략 시 전체). 세로로 긴 존에서 강제 지그재그 이동을 만들 때 쓰는 용도(`f1z2_platforms`의 타워 참고, FR-11.6).
-- FR-11.6 `f1z2_platforms` 존: 존 높이 1560px(바닥 y=1500 기준 20px 여유). 지상 계단(원웨이 발판 5개) 위에 폭 400px짜리 좁은 통로(샤프트, x:700~1100)가 이어짐 - `walls` 2개(`yMin`/`yMax`로 통로 구간에만)가 통로 좌우를 감싸고, 그 안에 `floors` 5개(`xMin`/`xMax`로 통로 폭에만)가 강제 지그재그 층을 이룸: 각 층은 통로 폭 대부분을 막고 한쪽 끝(좌/우 번갈아)에만 180px 구멍을 남겨, 층을 오를 때마다 통로 반대쪽 구멍을 찾아야 다음 층으로 갈 수 있음. 층간 간격 110px(한 번의 점프로 여유 있게 도달). 통로를 좁혀서 예전(존 전체 폭 기준) 버전보다 층당 이동 거리가 훨씬 짧음. 맨 위 층을 통과하면 통로 폭 전체를 덮는 착지용 전망대(원웨이 발판)로 이어지고, 거기에 `yMin`/`yMax`로 그 높이에만 걸리는 테스트용 트리거가 하나 있음(`repeatable: true`).
+- FR-11.6 `f1z2_platforms` 존: 존 높이 1560px(바닥 y=1500 기준 20px 여유). 지상 계단(원웨이 발판 3개, 오르막만)이 폭 400px짜리 좁은 통로(샤프트, x:950~1350)로 틈 없이 이어짐 - `walls` 2개(`yMin`/`yMax`로 통로 구간에만)가 통로 좌우를 감싸고, 그 안에 `floors` 5개(`xMin`/`xMax`로 통로 폭에만)가 강제 지그재그 층을 이룸: 각 층은 통로 폭 대부분을 막고 한쪽 끝(좌/우 번갈아)에만 180px 구멍을 남겨, 층을 오를 때마다 통로 반대쪽 구멍을 찾아야 다음 층으로 갈 수 있음(오른쪽으로 오르고 왼쪽으로 오르고 반복). 층간 간격 110px(한 번의 점프로 여유 있게 도달). 맨 위 층을 통과하면 통로 폭을 넘어 존 오른쪽 끝(벽 1860~1900 바로 앞)까지 넓게 이어지는 착지대(원웨이 발판)로 나오고, **그 착지대 위(땅바닥이 아님)에 다음 존(`f1z3_melee_practice`)으로 가는 문이 있음** - 땅바닥을 따라 그냥 오른쪽 끝까지 걸어가면 문 없이 벽만 있는 막다른 길이라, 반드시 샤프트를 다 올라야만 다음 구역으로 진행 가능.
 
 ### FR-12. HP / 사망 / 리스폰
 - FR-12.1 `PLAYER_MAX_HP`=5. HP가 0 이하가 되면 `gameState="respawning"` 전환, `RESPAWN_DELAY`(1.2s) 후 현재 체크포인트(`currentCheckpoint`)로 복귀.
 - FR-12.2 리스폰(`respawnPlayer`)은 `loadZone(currentCheckpoint.zoneId, currentCheckpoint)`를 호출해 위치/존/적(스폰 데이터로부터 재생성, 리셋이 아님)/투사체/카메라를 전부 그 체크포인트 기준으로 다시 세팅한 뒤, HP/무적(0.5×`HIT_INVINCIBILITY_DURATION`)/표류 관련 상태를 추가로 초기화한다. 죽은 존과 체크포인트의 존이 다를 수 있음(존을 넘나든 뒤 사망) - 두 경우 모두 동일하게 처리됨. `loadZone` 자체는 HP/공격/표류 상태를 건드리지 않으므로, 문 전환(`loadZone`만 호출)은 HP/쿨다운을 그대로 유지하고 사망(`respawnPlayer`)만 그 상태들을 리셋한다.
 - FR-12.3 `respawning` 상태에서도 투사체 업데이트는 계속되어 화면에서 자연스럽게 정리됨.
+- FR-12.4 체력 자연 회복(`tickHpRegen`, 플레이어/몬스터 공용 - `entity`는 `{hp, maxHp, timeSinceHit}`만 갖추면 됨): 존 규칙 `ruleFlags.hpRegenDelay`(숫자, 기본값 `null`=비활성)가 설정된 존에서만 발동. 마지막으로 피해를 입은 시점(`timeSinceHit=0`으로 리셋되는 시점 - 플레이어는 `applyDamageToHp`, 몬스터는 `damageEnemy`)부터 그 값(초)만큼 다시 피해를 안 입으면, 그 즉시(트리클 없이 한 프레임 만에) `hp`가 `maxHp`로 스냅됨. `hpFloor`(플레이어 최소 체력/몬스터 개별 불사)와는 독립된 별개의 존 규칙이라 서로 다른 조합으로 켜고 끌 수 있음(예: 현재 `f1z3_melee_practice`는 둘 다 켜져 있음). 존마다 이 값만 다르게 주면 난이도별 회복 속도를 조절할 수 있도록 설계됨.
 
 ### FR-13. 동료 유령 NPC (비상호작용)
 - FR-13.1 어떤 충돌/전투 판정 함수에서도 참조되지 않음 — 피해를 주지도 받지도, 플레이어/적 판정에 영향을 주지도 않음.
@@ -182,9 +185,10 @@ chaser: `patrolMinX,patrolMaxX,facing,aiState,attackTimer,stunTimer,perceptionTi
 |---|---|---|
 | 이동 | MOVE_SPEED / GRAVITY / MAX_FALL_SPEED / JUMP_FORCE / MAX_JUMPS | 420 / 2100 / 1400 / 760 / 2 |
 | 이동(숏홉) | AIR_ATTACK_HOP_FORCE / MAX_AIR_ATTACKS | 420 / 1 |
-| 근접 공격(지상) | ATTACK_RANGE_W/H / ATTACK_ACTIVE_DURATION / ATTACK_RECOVERY_DURATION / ATTACK_DAMAGE | 85/75 / 0.08 / 0.30 / 1 |
+| 근접 공격(지상) | ATTACK_RANGE_W/H / GROUND_ATTACK_ACTIVE_DURATION / GROUND_ATTACK_LUNGE_DISTANCE / GROUND_ATTACK_RECOVERY_DURATION / GROUND_ATTACK_POST_RECOVERY_LOCK_DURATION / ATTACK_DAMAGE | 85/75 / 0.13 / 10 / 0.30 / 0.08 / 1 |
+| 체력 자연 회복(플레이어+몬스터, hpRegenDelay 걸린 존만) | HP_REGEN_DELAY | 2.5 |
 | 근접 공격(공중) | AIR_ATTACK_RADIUS / 데미지(getAirAttackDamage = ATTACK_DAMAGE/2) | 85 / 0.5 |
-| 플레이어 | PLAYER_MAX_HP / HIT_INVINCIBILITY_DURATION / RESPAWN_DELAY / PIT_FALL_BUFFER | 5 / 0.5 / 1.2 / 60 |
+| 플레이어 | PLAYER_MAX_HP / HIT_INVINCIBILITY_DURATION / RESPAWN_DELAY / PIT_FALL_BUFFER | 5 / 0.6 / 1.2 / 60 |
 | 적 공통 범위(포탑/저격수 기본값) | ENEMY_DEFAULT_DETECTION_RANGE_W/H (감지만 유한, leash/attackRange는 Infinity=무한 어그로) | 480/270 |
 | 포탑 | TURRET_FIRE_INTERVAL / TURRET_TELEGRAPH_DURATION / TURRET_MAX_HP / PROJECTILE_SPEED/RADIUS/DAMAGE | 2.2 / 0.5 / 5 / 260 / 8 / 1 |
 | 저격수 | (FR-9.1~9.5 값 전부 포탑과 공유) / SNIPER_PROJECTILE_RADIUS | - / 15 |

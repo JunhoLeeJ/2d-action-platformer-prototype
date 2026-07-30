@@ -26,8 +26,29 @@ const CONFIG = {
   // 땅/공중 판정은 모양(사각형 vs 원)과 데미지가 다르지만 활성/후딜레이 타이밍은 공유한다 (startAttack 참고).
   ATTACK_RANGE_W: 85,        // 지상 공격 판정 가로 크기
   ATTACK_RANGE_H: 75,        // 지상 공격 판정 세로 크기
-  ATTACK_ACTIVE_DURATION: 0.08,  // 판정이 활성화되는 시간 (sec)
-  ATTACK_RECOVERY_DURATION: 0.30, // 후딜레이 (sec, 이 동안 재공격 불가)
+  ATTACK_ACTIVE_DURATION: 0.08,  // 공중 공격의 판정 활성 시간 (sec) - 지상 공격은 GROUND_ATTACK_ACTIVE_DURATION을 따로 씀
+  // 지상 공격 전용 활성 시간 - 예전엔 공중 공격과 ATTACK_ACTIVE_DURATION을 공유했으나, 지상 공격에
+  // "몸이 앞으로 쏠리는" 돌진 연출을 얹으면서 그 쏠림이 눈에 보일 시간을 벌기 위해 살짝 늘림
+  // (0.08 -> 0.13). 공중 공격은 원래 값 그대로 유지됨.
+  GROUND_ATTACK_ACTIVE_DURATION: 0.13,
+  // 지상 공격 스윙 한 번(GROUND_ATTACK_ACTIVE_DURATION 동안)에 이동하는 총 거리(px) - "대시"가 아니라
+  // 검을 휘두른 반작용으로 몸이 아주 살짝 쏠리는 정도라 일부러 작게 잡음. 속도가 아니라 "거리"로 정의해
+  // 두는 이유: GROUND_ATTACK_ACTIVE_DURATION을 나중에 조정해도(체감상 활성 시간을 바꿔볼 수 있으므로)
+  // 이 쏠림의 총 이동 거리는 그대로 유지되도록 하기 위함 - 실제 속도는
+  // getGroundAttackLungeSpeed()(player.js)가 이 값을 활성 시간으로 나눠서 매번 계산한다
+  // (getDriftCooldownOnCounter/Whiff와 같은 "관계는 함수로" 패턴).
+  GROUND_ATTACK_LUNGE_DISTANCE: 10,
+  ATTACK_RECOVERY_DURATION: 0.30, // 공중 공격 후딜레이 (sec, 이 동안 재공격 불가). 지상 공격은 GROUND_ATTACK_RECOVERY_DURATION을 따로 씀
+  // 지상 공격 전용 후딜레이 - 이 동안(recovery 상태) 좌우 이동 입력이 완전히 막히고 그 자리에 멈춰
+  // 있는다("검을 휘두른 뒤 잠깐 멈춰서기"). 공중 공격은 후딜레이 중에도 자유롭게 움직일 수 있는 기존
+  // 동작을 그대로 유지(ATTACK_RECOVERY_DURATION, 이동 잠금 없음).
+  GROUND_ATTACK_RECOVERY_DURATION: 0.30,
+  // 지상 공격 후딜레이가 끝난(attackState가 idle로 돌아온) 직후에도 아주 짧게 한 번 더 이동을 막는
+  // 여유시간(sec) - "연타하지 않았다면 조금 더 있다가 움직일 수 있음"에 해당. 이 여유시간이 끝나기 전에
+  // 바로 다음 공격을 넣으면(재공격은 attackState==="idle"이기만 하면 언제든 가능) 그 스윙 자신의
+  // 잠금(active+recovery)이 곧바로 이어받으므로 이 값은 자연히 무의미해짐 - 콤보 여부에 따라 별도
+  // 분기를 두지 않아도 "연타하면 안 걸리고, 안 하면 걸리는" 동작이 그대로 성립한다.
+  GROUND_ATTACK_POST_RECOVERY_LOCK_DURATION: 0.08,
   ATTACK_DAMAGE: 1,          // 지상 공격 1회당 적에게 주는 데미지
   // 공중 공격(플레이어가 땅에 없을 때 좌클릭) 판정 반경. 플레이어 중심 기준 원형이라 방향 무관.
   // 지상 공격 판정(85x75)보다 훨씬 넓지는 않되, 방향 무관 원형이라 위/아래로는 여전히 지상 공격보다
@@ -41,9 +62,18 @@ const CONFIG = {
 
   // --- 플레이어 ---
   PLAYER_MAX_HP: 5,
-  HIT_INVINCIBILITY_DURATION: 0.5, // 피격 후 무적시간 (sec) - HP가 실제로 깎이는 순간(applyDamageToHp)부터 시작
+  HIT_INVINCIBILITY_DURATION: 0.6, // 피격 후 무적시간 (sec) - HP가 실제로 깎이는 순간(applyDamageToHp)부터 시작
   RESPAWN_DELAY: 1.2,        // 사망 후 리스폰까지 대기시간 (sec)
   PIT_FALL_BUFFER: 60,       // 낙사 판정 여유값 (px) - 화면 아래로 이 정도 더 떨어지면 사망 처리
+
+  // 무피격 시간 경과 후 즉시(스냅) 풀피 회복 - 플레이어/몬스터 공용 범용 시스템(tickHpRegen,
+  // js/entities/enemies.js). ruleFlags.hpRegenDelay(RULE_FLAG_DEFAULTS, zones.js)가 걸린 존에서만
+  // 발동하며, 그 존 안의 플레이어와 모든 몬스터 둘 다에게 동일하게 적용된다. "서서히 차오르는" 연출은
+  // 일부러 버렸음(사용자 요청) - 마지막으로 피격된 시점부터 이 시간(sec) 동안 다시 안 맞으면 그 즉시
+  // 최대 체력으로 스냅됨. 값 자체는 여기 하나뿐이지만 게이트가 존 단위 규칙 플래그라서, 이후 난이도
+  // 조절(쉬움=짧은 지연/기본 켜짐, 어려움=회복 없음)이 필요해지면 존마다 ruleFlags.hpRegenDelay만
+  // 다르게(또는 null로 꺼서) 주면 됨 - 이 상수를 직접 늘리는 대신 존 단위로 오버라이드하는 걸 권장.
+  HP_REGEN_DELAY: 2.5,
 
   // --- 적 공통: 감지/어그로/공격 범위 ---
   // 모든 몬스터가 감지(detection) → 어그로(leash) → 공격(attack) 3단계 범위 개념을 공통으로 갖는다.
