@@ -120,29 +120,14 @@ function makeMimeA(x, y, opts = {}) {
   return { ...chaser, type: "mimeA", hp: CONFIG.MIME_A_MAX_HP, maxHp: CONFIG.MIME_A_MAX_HP };
 }
 
-// 적 B(mimeB, 1층 구역 4) - 완전 수동형. 감지/어그로/공격 범위 자체가 없어(다른 몬스터와 달리
-// makeStationaryRangeFields를 안 씀) updateEnemies가 이 타입엔 AI 업데이트 함수를 아예 안 돌린다
-// (아래 updateEnemies 참고) - 화면에 그냥 서서 몸통 색만 옅게 pulse한다("웅얼거림", 시각적 동작 없음).
-function makeMimeB(x, y, opts = {}) {
-  const stunnable = opts.stunnable ?? true;
-  return {
-    id: enemyIdCounter++,
-    type: "mimeB",
-    spawnX: x, spawnY: y,
-    x, y, w: 34, h: 40,
-    hp: CONFIG.MIME_B_MAX_HP,
-    maxHp: CONFIG.MIME_B_MAX_HP,
-    alive: true,
-    flashTimer: 0,
-    hasBeenVisible: false,
-    stunnable,
-    hpFloor: opts.hpFloor ?? null,
-    timeSinceHit: Infinity,
-  };
-}
+// 적 B(mimeB, 1층 구역 4)는 여기 없다 - "배경의 일부"일 뿐 enemies[]에 들어가는 실제 몬스터가
+// 아니라서(사용자 확인: 체력 UI 없음, 죽을 수 없음, 봉쇄 벽 조건과도 무관해야 함) 순수 배경 장식으로
+// zone.ambientProps에 데이터만 두고 draw()가 따로 그린다(js/rendering.js의 drawMimeBProp 참고) -
+// damageEnemy/wallGates 등 이 파일의 어떤 전투 판정 코드도 거치지 않으므로 "안 죽음"이 별도 무적
+// 플래그 없이 구조적으로 보장된다.
 
 // 존 데이터의 enemySpawns[i].type을 실제 팩토리 함수로 매핑 - loadZone()이 이걸로 몬스터를 새로 만든다.
-const ENEMY_FACTORIES = { turret: makeTurret, sniper: makeSniper, chaser: makeChaser, mimeA: makeMimeA, mimeB: makeMimeB };
+const ENEMY_FACTORIES = { turret: makeTurret, sniper: makeSniper, chaser: makeChaser, mimeA: makeMimeA };
 
 // 현재 존에 살아있는 몬스터 목록 - 존을 옮길 때마다(loadZone) 통째로 비우고 그 존의 enemySpawns로부터
 // 다시 채워진다. 예전 resetEnemies()는 삭제됨 - "리셋"이 아니라 "항상 새로 만든다"라서 이전 존/이전
@@ -171,7 +156,6 @@ function damageEnemy(enemy, amount) {
       enemy.fireTimer = CONFIG.TURRET_FIRE_INTERVAL;
       enemy.telegraphing = false;
     }
-    // mimeB: 완전 수동형이라 공격 준비 상태 자체가 없음 - 리셋할 게 없어서 분기 없음.
   }
   if (enemy.hp <= 0) {
     // hpFloor가 있으면 그 값에서 멈추고 죽지 않는다 - HP가 깎이는 티는 그대로 나되(핍이 거의 빔)
@@ -366,7 +350,6 @@ function updateEnemies(dt) {
     if (!enemy.hasBeenVisible) continue;
 
     if (enemy.type === "chaser" || enemy.type === "mimeA") updateChaserAI(enemy, dt);
-    else if (enemy.type === "mimeB") { /* 완전 수동형 - AI 없음, draw()에서 pulse만 그림 */ }
     else updateTurretAI(enemy, dt);
   }
 }

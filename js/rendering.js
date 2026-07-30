@@ -63,6 +63,17 @@ function drawDoor(door) {
   ctx.strokeRect(door.x + 3, door.y + 3, door.w - 6, door.h - 6);
 }
 
+// 배경 장식 - 순수 연출, enemies[]에 없고 어떤 판정에도 관여 안 함(js/entities/enemies.js 상단 주석
+// 참고). 지금은 mimeB(웅얼거림) 하나뿐이라 타입 분기 없이 바로 그림 - 몸통 색이 옅게 밝아졌다
+// 어두워지는 pulse만 있음(§ 5 아트 제약: 시각적 동작 없음). 포탑 예고 pulse와 같은 패턴으로 저장
+// 상태 없이 performance.now()에서 바로 유도하고, prop.x를 위상 오프셋에 섞어 여러 개가 있어도
+// 서로 안 겹치게 함(enemy.id 대신 - ambientProps는 enemies[]가 아니라 id 개념이 없음).
+function drawMimeBProp(prop) {
+  const dimColor = "#5b6470", brightColor = "#aeb8c4";
+  const pulse = (Math.sin(performance.now() / CONFIG.MIME_B_PULSE_SPEED + prop.x) + 1) / 2;
+  drawRect(prop, pulse > 0.5 ? brightColor : dimColor);
+}
+
 function draw() {
   ctx.clearRect(0, 0, W, H);
 
@@ -113,13 +124,17 @@ function draw() {
     ctx.textAlign = "left"; // 이후 다른 텍스트 렌더링에 영향 없도록 기본값으로 복귀
   }
 
+  // 배경 장식 (순수 연출, 전투 판정 없음 - drawMimeBProp 참고)
+  for (const prop of currentZone.ambientProps || []) {
+    if (prop.type === "mimeB") drawMimeBProp(prop);
+  }
+
   // 적 (포탑 + 체이서 공통 렌더링. 보라색 = 근접 공격으로도 스턴 안 걸리는 면역 개체 - 타입 공통 표시)
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
 
     const isChaser = enemy.type === "chaser";
     const isMimeA = enemy.type === "mimeA";
-    const isMimeB = enemy.type === "mimeB";
     // mimeA는 전투 로직(추적/근접 공격) 자체를 체이서와 공유하므로(makeMimeA 참고), "예고 중 보여주는
     // 판정 미리보기"/"경고색 pulse" 같은 체이서 전용 시각 처리도 같이 타야 한다 - isChaser 단독이 아니라
     // 이 합쳐진 플래그로 판정.
@@ -129,7 +144,6 @@ function draw() {
     const baseColor = !enemy.stunnable
       ? "#8e44ad"
       : isMimeA ? "#7c6a53" // 배경 몬스터 - 다른 전투형 몬스터들과 안 겹치는 흙빛 톤
-      : isMimeB ? "#5b6470" // 배경 몬스터 - 어두운 슬레이트, pulse로 밝아짐(아래)
       : isChaser ? "#5c8a3a"
       : isSniper ? "#00838f" // 포탑(빨강)/체이서(초록)/면역(보라)과 겹치지 않는 청록 - "다른 놈"이라는 신호
       : "#b23b3b";
@@ -141,11 +155,6 @@ function draw() {
       color = isChaserLike ? (pulse > 0.5 ? "#ff5252" : "#ff8a65")
         : isSniper ? (pulse > 0.5 ? "#f50057" : "#ff4081")
         : (pulse > 0.5 ? "#ffb300" : "#ff6f3c");
-    } else if (isMimeB && enemy.flashTimer <= 0) {
-      // 웅얼거림(§ 5 아트 제약) - 감지/공격 개념 자체가 없는 완전 수동형이라 상시로 옅게 밝아졌다
-      // 어두워지는 pulse만 있음. enemy.id를 위상에 섞어서 여러 마리가 있어도 똑같이 안 움직이게 함.
-      const pulse = (Math.sin(performance.now() / CONFIG.MIME_B_PULSE_SPEED + enemy.id) + 1) / 2;
-      color = pulse > 0.5 ? "#aeb8c4" : baseColor;
     }
     drawRect(enemy, color);
     // "눈" - 플레이어 방향을 향하는 작은 원, 예고 중엔 커지고 밝아짐

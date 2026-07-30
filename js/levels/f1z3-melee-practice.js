@@ -58,15 +58,9 @@
       },
     },
 
-    triggerZones: [
-      {
-        id: "melee_practice_intro", kind: "auto",
-        sequence: [
-          { type: "dialogue", speaker: null, text: "[정적] 몸이 이 정도 상처는 버텨낸다. 완전히 쓰러지진 않을 것 같다." },
-          { type: "dialogue", speaker: null, text: "[정적] 잠시 맞지 않고 버티면, 상처는 어느 순간 한꺼번에 아무는 듯하다." },
-        ],
-      },
-    ],
+    // 대사는 아직 안 넣음(사용자가 나중에 정확한 문구/타이밍을 직접 지정할 예정) - 컷신 엔진 자체는
+    // 그대로 있으니 필요해지면 이 배열에 트리거를 추가하면 됨.
+    triggerZones: [],
     ruleFlags: { hideGhostNpc: true, hpFloor: 1, hpRegenDelay: CONFIG.HP_REGEN_DELAY },
   };
 })();

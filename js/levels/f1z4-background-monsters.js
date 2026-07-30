@@ -1,16 +1,15 @@
 "use strict";
 
-// 1층 구역 4 - 배경 몬스터(적 A 2마리 + 적 B 1마리). 원작 스펙: "전투 대상 아님(지나가는 구간)" -
-// 그래서 이 존엔 wallGates가 없다(몬스터를 다 잡아야 열리는 봉쇄 벽 자체가 없음 - 그냥 지나가면 됨).
-// "배경"이라는 성격은 AI를 약하게 만들어서가 아니라 순수 레벨 디자인으로 만든다:
-//   - 적 A(mimeA)는 실제 전투 능력(감지→추적→근접 공격) 자체는 체이서를 그대로 재사용한다
-//     (js/entities/enemies.js의 makeMimeA/updateChaserAI 참고) - 새 몬스터 "타입"이 필요한 이유는
-//     체력값과 도형 기반 유휴 애니메이션(§ 5, 손짓 반복→감지 시 정지) 때문이지 AI 로직 때문이 아니다.
-//   - 적 B(mimeB)는 완전 수동형 - 감지/공격 개념 자체가 없고 몸통 색이 옅게 pulse만 한다(웅얼거림).
-// 1층 전체 예외 규칙(§ 1층 레벨 레이아웃 상단, ROADMAP.md) "구역 5 즉사 씬 제외 플레이어가 죽으면
-// 안 됨"이 여기도 적용된다 - mimeA가 실제로 근접 공격 데미지를 줄 수 있는 이상, 구역 3과 동일하게
-// hpFloor+hpRegenDelay를 걸어서 지나가다 우연히 얻어맞아도 죽지 않게 한다(적 자체엔 hpFloor를
-// 안 줬음 - "안 죽는 연습용 몬스터"가 아니라 그냥 지나치는 배경이라, 플레이어가 굳이 잡으면 죽어도 무방).
+// 1층 구역 4 - 배경 몬스터(적 A 2마리) + 배경 장식(적 B 1개). 원작 스펙: "전투 대상 아님(지나가는
+// 구간)"이었지만, 사용자 확인으로 실제 봉쇄 벽(적 A를 다 잡아야 열리는 벽)을 넣기로 함 - 그래서
+// 적 A(mimeA)만 진짜 "적"(enemies[] 소속, 죽을 수 있고 봉쇄 벽 조건에 들어감)이고, 적 B(mimeB)는
+// `enemies[]`에 아예 안 들어가는 순수 배경 장식이다(§ 아래, ambientProps). 죽지 않고 체력 UI도 없는
+// 이유가 바로 이것 - "적으로 정의하지 않음" 자체가 곧 "안 죽음"이 되도록 구조 자체로 만족시킴(별도
+// 무적 플래그 불필요). 이 설계 덕분에 봉쇄 벽 잠금 조건(`isGateLocked`, js/engine/zones.js)이 보는
+// `enemies[]`에 mimeB가 애초에 없어서, 적 B의 생사는 봉쇄 벽과 구조적으로 완전히 무관하다.
+//
+// 대사는 아직 안 넣음(사용자가 나중에 정확한 문구/타이밍을 직접 지정할 예정) - 컷신 엔진 자체는
+// 그대로 있으니(js/engine/cutscene.js) 필요해지면 triggerZones에 추가하면 됨.
 (function () {
   const groundY = 750, groundH = 40;
   const doorH = 140;
@@ -28,7 +27,11 @@
     solidPlatforms: [],
     oneWayPlatforms: [],
 
-    wallGates: [], // "전투 대상 아님" - 몬스터를 안 잡아도 그냥 지나갈 수 있어야 하므로 봉쇄 벽 없음
+    // 적 A 2마리를 다 잡아야 열림 - spawnX(480, 1380) 둘 다 gate.x(1650)보다 왼쪽이라 죽어야 잠금 해제.
+    // mimeB는 enemies[]에 없으므로 isGateLocked/countAliveBehindGate 어느 쪽 판정에도 아예 안 잡힘.
+    wallGates: [
+      { x: 1650, w: 40, visualY: 0, visualH: 790 },
+    ],
     floors: [],
     walls: [
       { x: 0, w: 40, gaps: [] },
@@ -37,8 +40,15 @@
 
     enemySpawns: [
       { type: "mimeA", x: 480, y: groundY - 44, opts: {} },
-      { type: "mimeB", x: 950, y: groundY - 40, opts: {} },
       { type: "mimeA", x: 1380, y: groundY - 44, opts: {} },
+    ],
+
+    // 순수 배경 장식 - enemies[]/damageEnemy/wallGates 등 어떤 전투 판정에도 관여하지 않는다.
+    // draw()가 zone.ambientProps를 따로 순회하며 그리기만 함(js/rendering.js의 drawMimeBProp 참고) -
+    // 공격해도 맞는 판정 자체가 없어서(그 루프에 아예 안 들어감) 죽일 방법이 없다. 몸통 색이 옅게
+    // 밝아졌다 어두워지는 pulse만 있음(§ 5 아트 제약 "웅얼거림": 시각적 동작 없음, pulse만).
+    ambientProps: [
+      { type: "mimeB", x: 950, y: groundY - 40, w: 34, h: 40 },
     ],
 
     entryPoint: { x: 40, y: standingTopY },
@@ -53,14 +63,7 @@
       right: null,
     },
 
-    triggerZones: [
-      {
-        id: "background_monsters_intro", kind: "auto",
-        sequence: [
-          { type: "dialogue", speaker: null, text: "[정적] ...저것들은 나를 신경 쓰지 않는 것 같다. 그냥 지나가자." },
-        ],
-      },
-    ],
+    triggerZones: [],
     ruleFlags: { hideGhostNpc: true, hpFloor: 1, hpRegenDelay: CONFIG.HP_REGEN_DELAY },
   };
 })();
