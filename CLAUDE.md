@@ -8,6 +8,8 @@ A 2D side-scrolling action platformer prototype, implemented as plain HTML/CSS/J
 
 For *why* the game works the way it does and the exact behavior of every system, read `PRD.md` (product intent) and `SRS.md` (functional requirements with exact numbers) before making non-trivial gameplay changes — they document the current implementation, not aspirational features. Keep them in sync when you change behavior they describe.
 
+This project is being built out into a larger story-driven game (multiple floors, each with several zones, cutscenes, an AI companion) beyond what PRD/SRS describe. **Before starting any zone/floor/story content work, read `ROADMAP.md`** — it holds the original narrative design spec broken into a checklist (what's done, what isn't, exact dialogue lines and numbers to preserve) plus a recommended next-work order. Update it whenever you finish a checklist item, change the recommended order, or add new reusable engine infrastructure while building content — it's the only continuity across sessions for "where were we," so treat it with the same discipline as PRD/SRS.
+
 ## Commands
 
 - **Run locally**: open `index.html` directly in a browser, or `npx serve .` for a local server.
