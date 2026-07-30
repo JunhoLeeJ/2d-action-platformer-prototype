@@ -17,7 +17,7 @@ const player = {
   invincibleTimer: 0,
   timeSinceHit: Infinity, // 마지막으로 HP가 실제로 깎인 뒤 흐른 시간 (sec) - tickHpRegen이 이 값으로 회복 시작 여부를 판단
 
-  attackState: "idle",     // idle | active | recovery
+  attackState: "idle",     // idle | windup(지상 전용) | active | recovery
   attackTimer: 0,
   hitEnemiesThisSwing: new Set(),
   attackIsAirborne: false, // 이번 스윙이 공중 공격인지 (startAttack 시점의 onGround로 고정, getAttackHitbox/draw에서 참고)
@@ -68,14 +68,27 @@ function updateGhostNpc(dt) {
 /* --------------------------- 업데이트 로직 --------------------------- */
 
 function startAttack() {
-  player.attackState = "active";
   player.hitEnemiesThisSwing.clear();
   // 스윙 시작 시점의 접지 상태로 고정 - 도중에 이/착지해도 스윙 종류가 안 바뀌게 함(모양/데미지가
-  // 프레임 중간에 바뀌면 시각효과와 판정이 어긋나 보임). attackTimer 분기보다 먼저 정해야 함.
+  // 프레임 중간에 바뀌면 시각효과와 판정이 어긋나 보임). attackState/Timer 분기보다 먼저 정해야 함.
   player.attackIsAirborne = !player.onGround;
-  player.attackTimer = player.attackIsAirborne ? CONFIG.ATTACK_ACTIVE_DURATION : CONFIG.GROUND_ATTACK_ACTIVE_DURATION;
-  // 이전 스윙이 남긴 후속 이동잠금은 이번 스윙 자신의 잠금(active의 쏠림 + recovery의 정지)이 곧바로
-  // 이어받으므로 더 이상 의미가 없다 - 새 스윙 시작 시 확실히 정리.
+  if (player.attackIsAirborne) {
+    // 공중 공격은 그대로 즉발 - 판정이 원형이라 방향/위치가 이미 확정적이고, 숏홉 특성상 반응이
+    // 빨라야 체감이 좋기 때문에 선딜을 넣지 않음.
+    player.attackState = "active";
+    player.attackTimer = CONFIG.ATTACK_ACTIVE_DURATION;
+  } else {
+    // 지상 공격은 아주 짧은 선딜(windup)을 먼저 거친다 - 즉발이면 클릭한 그 프레임에 판정/데미지가
+    // 바로 들어가서 캐릭터와 공격 이펙트가 "겹쳐 보이는" 부자연스러움이 있었다(추후 실제 스윙
+    // 애니메이션을 넣어도 마찬가지 문제가 생김). GROUND_ATTACK_WINDUP_DURATION은 사람이 인지 못 할
+    // 정도로 짧게 잡아서(숏홉 콤보 보정 때 쓰던 것과 같은 크기의 값) "즉발처럼 느껴지되 실제로는
+    // 살짝의 준비 동작이 있는" 정도로만 만든다. 판정/데미지(getAttackHitbox 등)는 windup 동안 전혀
+    // 발동하지 않고 active로 넘어간 뒤에만 체크됨(updatePlayer의 공격 상태 처리 블록 참고).
+    player.attackState = "windup";
+    player.attackTimer = CONFIG.GROUND_ATTACK_WINDUP_DURATION;
+  }
+  // 이전 스윙이 남긴 후속 이동잠금은 이번 스윙 자신의 잠금(windup/active의 정지+쏠림 + recovery의
+  // 정지)이 곧바로 이어받으므로 더 이상 의미가 없다 - 새 스윙 시작 시 확실히 정리.
   player.postAttackLockTimer = 0;
 }
 
@@ -192,12 +205,12 @@ function updatePlayer(dt) {
   // 건드리지 않아 직전 방향(마지막으로 이동한 방향, 혹은 아래 공격 입력 블록이 남겨둔 방향)을 그대로
   // 유지한다 - 마우스는 여기서 안 본다. 마우스는 오직 "공격을 막 시작하는 그 순간"에만 아래 공격 입력
   // 블록에서 별도로 이 값을 덮어써서, 그 순간만 마우스가 이동 방향보다 우선권을 가져가는 식으로 동작한다
-  // (예: 오른쪽으로 달리면서도 마우스가 왼쪽이면 왼쪽을 벤다). 지상 공격의 active 스윙 도중에는(항상
-  // 그래왔듯) 이동 여부와 무관하게 무조건 고정 - 스윙 방향이 중간에 바뀌면 판정/연출이 어긋나 보이기
-  // 때문(공중 공격은 원래 방향 무관 원형 판정이라 영향 없음).
-  if (!(player.attackState === "active" && !player.attackIsAirborne)) {
-    if (move !== 0) player.facing = move;
-  }
+  // (예: 오른쪽으로 달리면서도 마우스가 왼쪽이면 왼쪽을 벤다). 지상 공격의 windup/active/recovery
+  // 도중에는(항상 그래왔듯) 이동 여부와 무관하게 무조건 고정 - 스윙 방향이 중간에 바뀌면 판정/연출이
+  // 어긋나 보이기 때문. 별도 상태 분기 없이 그냥 `move !== 0`만 보는 이유는, 그 세 상태 동안엔
+  // groundAttackControlLocked에 의해 move가 항상 이미 0으로 강제되어 있어서 자연히 걸리지 않기
+  // 때문(공중 공격은 groundAttackControlLocked 자체가 안 걸리므로 이동에 따라 정상적으로 갱신됨).
+  if (move !== 0) player.facing = move;
 
   // --- 표류 입력 (단발 - 우클릭 한 번으로 발동, 홀드/뗄 때 입력 불필요) ---
   // driftUnlocked: 스토리상 특정 지점(구역 5 재방문)까지는 표류 자체가 잠겨있어야 하는 전역 게이트.
@@ -219,28 +232,20 @@ function updatePlayer(dt) {
   // groundAttackControlLocked 동안은 점프도 막는다 - 원래 이동만 막고 점프는 그대로 통과되던 버그가
   // 있었음(지상 공격으로 "조작 불가" 상태인데 점프로는 빠져나갈 수 있었던 것 - 사용자 피드백으로 발견).
   //
-  // 예외(숏홉 콤보 보정, GROUND_ATTACK_JUMP_CONVERSION_WINDOW 참고): 점프와 공격 클릭을 사람이 인지
-  // 못 할 만큼 짧은 간격으로 거의 동시에 누르면, 입력 이벤트 처리 순서가 미세하게 흔들려서 공격이
-  // 점프보다 아주 살짝 먼저 처리될 수 있다 - 그 경우 그 스윙이(아직 onGround가 true였으므로) 지상
-  // 공격으로 확정되어버려 곧바로 이어지는 이 점프 입력이 위 조작 잠금에 막혀버린다. 그 스윙이 시작된
-  // 지 GROUND_ATTACK_JUMP_CONVERSION_WINDOW 이내라면(=사람이 인지할 수 없을 정도로 짧은 차이),
-  // canConvertToShortHop이 true가 되어 아래에서 그 스윙을 공중 공격으로 전환한다. 이 유예시간을
-  // 넘겨서 점프가 들어오면(플레이어가 "공격부터 하고 한참 뒤에 점프를 눌렀다"고 인지할 시점) 절대
-  // 전환하지 않고 원래대로 막는다 - 의도치 않은 스킬 발동을 억지로 만들어주면 안 되기 때문.
-  const canConvertToShortHop =
-    player.attackState === "active" && !player.attackIsAirborne &&
-    player.airAttacksUsed < CONFIG.MAX_AIR_ATTACKS &&
-    (CONFIG.GROUND_ATTACK_ACTIVE_DURATION - player.attackTimer) <= CONFIG.GROUND_ATTACK_JUMP_CONVERSION_WINDOW;
+  // 예외: 지상 공격의 선딜(windup, GROUND_ATTACK_WINDUP_DURATION 참고) 도중에는 점프가 그 공격을
+  // 캔슬하고 공중 공격(숏홉)으로 전환한다. windup은 판정/데미지가 전혀 없는 순수 준비 동작 구간이라
+  // (startAttack 참고) 이 시점에 캔슬해도 이미 맞은 적이 있을 리 없어 안전하다 - 숏홉 콤보(점프->공중
+  // 공격)를 시도하다 공격 클릭이 점프보다 아주 살짝 먼저 처리되어버린 경우(입력 이벤트 순서의 미세한
+  // 흔들림), windup이 그 미세한 차이를 흡수해주는 효과를 냄. windup을 완전히 지나 active로 넘어간
+  // 뒤에 점프가 들어오면(=사람이 인지 가능할 만큼 늦게 눌렀다는 뜻) 더 이상 캔슬하지 않고 원래대로 막는다.
+  const inGroundWindup = player.attackState === "windup";
 
   if (justPressed["Space"] && !getRuleFlag("disableJump") && player.jumpsUsed < CONFIG.MAX_JUMPS &&
-      (!groundAttackControlLocked || canConvertToShortHop)) {
-    if (canConvertToShortHop) {
-      // 방금 지상 공격으로 확정된 스윙을 공중 공격으로 전환 - startAttack()을 다시 부르지 않고 직접
-      // 필드만 바꾸는 이유는, startAttack()이 hitEnemiesThisSwing을 비워버려서(이미 그 몇 프레임
-      // 사이에 지상 판정으로 맞춘 적이 있었다면) 곧바로 이어지는 공중 판정으로 같은 적을 또 맞추는
-      // 하이브리드 이중 히트가 생길 수 있기 때문 - 비우지 않고 그대로 이어받아 안전하게 막는다.
+      (!groundAttackControlLocked || inGroundWindup)) {
+    if (inGroundWindup) {
       player.attackIsAirborne = true;
-      player.attackTimer = CONFIG.ATTACK_ACTIVE_DURATION; // 공중 공격 본연의 활성 시간으로 재설정
+      player.attackState = "active";
+      player.attackTimer = CONFIG.ATTACK_ACTIVE_DURATION; // 공중 공격 본연의 활성 시간으로 전환
       player.vy = -CONFIG.AIR_ATTACK_HOP_FORCE;
       player.airAttacksUsed += 1;
     } else {
@@ -288,7 +293,17 @@ function updatePlayer(dt) {
       player.airAttacksUsed += 1;
     }
   }
-  if (player.attackState === "active") {
+  if (player.attackState === "windup") {
+    // 지상 공격 전용 선딜 - 판정/데미지가 전혀 없는 순수 대기(startAttack/GROUND_ATTACK_WINDUP_DURATION
+    // 참고). 이 상태는 오직 지상 공격만 거치므로(공중 공격은 startAttack에서 곧바로 "active") 여기서
+    // attackIsAirborne을 따로 분기할 필요가 없다. 이 상태 도중의 점프 캔슬(공중 공격으로 전환)은 위
+    // 점프 입력 블록에서 처리됨.
+    player.attackTimer -= dt;
+    if (player.attackTimer <= 0) {
+      player.attackState = "active";
+      player.attackTimer = CONFIG.GROUND_ATTACK_ACTIVE_DURATION;
+    }
+  } else if (player.attackState === "active") {
     player.attackTimer -= dt;
     // 지상 공격 전용 돌진: 이동 입력을 무시하고 매 프레임 강제로 facing 방향 속도를 덮어써서
     // "몸이 앞으로 쏠리는" 연출 + 그 짧은 순간의 조작 불능을 만든다. 이 블록이 이동 입력 처리

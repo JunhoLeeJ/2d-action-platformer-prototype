@@ -322,10 +322,10 @@ function updateHud() {
   // 트리클이 아니라 즉시 스냅이라 이 값이 서서히 올라가다 마는 일은 없음(0 아니면 가득).
   hpText.textContent = `HP ${Math.floor(Math.max(0, player.hp))} / ${CONFIG.PLAYER_MAX_HP}`;
 
-  // 판정 활성(active) 중엔 항상 0% - 재사용 불가 구간이라 진행률을 보여줄 필요가 없음.
-  // recovery 진입부터 (지상/공중 각각의) 후딜레이 시간을 기준으로 게이지가 차오름.
+  // 선딜(windup, 지상 전용)/판정 활성(active) 중엔 항상 0% - 둘 다 재사용 불가 구간이라 진행률을
+  // 보여줄 필요가 없음. recovery 진입부터 (지상/공중 각각의) 후딜레이 시간을 기준으로 게이지가 차오름.
   let atkRatio;
-  if (player.attackState === "active") {
+  if (player.attackState === "windup" || player.attackState === "active") {
     atkRatio = 0;
   } else if (player.attackState === "recovery") {
     const recoveryDuration = player.attackIsAirborne ? CONFIG.ATTACK_RECOVERY_DURATION : CONFIG.GROUND_ATTACK_RECOVERY_DURATION;
