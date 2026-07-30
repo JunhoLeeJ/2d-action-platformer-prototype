@@ -202,6 +202,15 @@ function checkAutoTrigger(zoneId) {
   }
 }
 
+// repeatable 트리거가 "그 자리에 가만히 서있는 동안 매 프레임 다시 발동"하지 않도록 - 한 번 겹친
+// 트리거는 플레이어가 완전히 벗어났다가 다시 들어와야만 재발동한다("OnTriggerEnter"류의 표준 동작).
+// zoneId+triggerId로 키를 잡아서(seenTriggerIds와 동일한 패턴) 존이 달라지면 자연히 별개로 취급됨.
+// gameState가 "cutscene"인 동안엔 scanTriggerZones 자체가 안 불리므로(update() 참고), 시퀀스가
+// 도는 내내 이 Set은 그대로 유지된다 - 시퀀스가 끝나고 "playing"으로 돌아온 첫 프레임에 플레이어가
+// 아직 같은 자리에 서있어도 "계속 안에 있었다"로 잡혀 재발동하지 않고, 실제로 밖으로 나갔다 들어와야
+// 다시 발동한다.
+const triggerContactState = new Set();
+
 // "playing" 상태에서 매 프레임 호출 - 걸어 들어가면 발동하는(walkIn) 트리거를 확인한다.
 // X 범위만 검사하고 세로는 아예 안 봐서(§ 존 트리거 도어 등) 어떤 점프로도 피할 수 없다.
 // yMin/yMax는 선택 사항 - 둘 다 생략하면 기존과 동일하게 X 범위만으로 판정(세로 위치 무관, 점프로
@@ -216,11 +225,17 @@ function scanTriggerZones() {
     const key = currentZone.id + ":" + trigger.id;
     if (!trigger.repeatable && seenTriggerIds.has(key)) continue;
     const overlapsX = player.x + player.w > trigger.xMin && player.x < trigger.xMax;
-    if (!overlapsX) continue;
     const overlapsY =
       (trigger.yMin === undefined || player.y + player.h > trigger.yMin) &&
       (trigger.yMax === undefined || player.y < trigger.yMax);
-    if (overlapsY) {
+    const isInside = overlapsX && overlapsY;
+    const wasInside = triggerContactState.has(key);
+    if (!isInside) {
+      if (wasInside) triggerContactState.delete(key);
+      continue;
+    }
+    if (!wasInside) {
+      triggerContactState.add(key);
       fireTrigger(trigger, currentZone.id);
       return;
     }

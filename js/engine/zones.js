@@ -35,36 +35,39 @@ function hasGapBetween(xA, xB) {
   return currentZone.groundGaps.some((gap) => gap.x < hi && gap.x + gap.w > lo);
 }
 
-// 가로 막대(바닥/층) 하나를 gaps만큼 구멍 뚫어서 여러 조각으로 쪼갬 - buildGroundSegments(기존 바닥)와
-// zone.floors(§ 추가 층, 아래)가 이 함수 하나를 공유한다.
-function buildHorizontalBarrierSegments(y, h, width, gaps) {
+// 가로 막대(바닥/층) 하나를 [xStart,xEnd] 구간 안에서 gaps만큼 구멍 뚫어서 여러 조각으로 쪼갬 -
+// buildGroundSegments(기존 바닥, 항상 존 전체 폭)와 zone.floors(§ 추가 층, 아래 - xMin/xMax로 특정
+// 구간에만 놓을 수도 있음, 예: 좁은 통로/방)가 이 함수 하나를 공유한다.
+function buildHorizontalBarrierSegments(y, h, xStart, xEnd, gaps) {
   const segments = [];
   const sorted = [...gaps].sort((a, b) => a.x - b.x);
-  let cursor = 0;
+  let cursor = xStart;
   for (const gap of sorted) {
     if (gap.x > cursor) segments.push({ x: cursor, y, w: gap.x - cursor, h });
-    cursor = gap.x + gap.w;
+    cursor = Math.max(cursor, gap.x + gap.w);
   }
-  if (cursor < width) segments.push({ x: cursor, y, w: width - cursor, h });
+  if (cursor < xEnd) segments.push({ x: cursor, y, w: xEnd - cursor, h });
   return segments;
 }
 // zone def의 groundGaps를 뺀 나머지 구간으로 바닥 조각들을 만듦 - "바닥"은 낙사 판정(FR-1.5 등)과
 // 체이서의 구멍 회피(hasGapBetween)에 쓰이는 유일한 특별한 층이라 다른 층(floors)과 분리되어 있다.
+// 항상 존 전체 폭(0~width)에 걸침 - 부분 구간이 필요하면 그건 floors의 몫.
 function buildGroundSegments(def) {
-  return buildHorizontalBarrierSegments(def.groundY, def.groundH, def.width, def.groundGaps);
+  return buildHorizontalBarrierSegments(def.groundY, def.groundH, 0, def.width, def.groundGaps);
 }
 
-// 세로 막대(벽) 하나를 gaps(세로 구간)만큼 뚫어서 여러 조각으로 쪼갬 - buildHorizontalBarrierSegments를
-// 가로/세로 뒤집은 버전. zone.walls(§ 아래)가 사용.
-function buildVerticalBarrierSegments(x, w, height, gaps) {
+// 세로 막대(벽) 하나를 [yStart,yEnd] 구간 안에서 gaps(세로 구간)만큼 뚫어서 여러 조각으로 쪼갬 -
+// buildHorizontalBarrierSegments를 가로/세로 뒤집은 버전. zone.walls(§ 아래)가 사용 - yMin/yMax로
+// 존 전체 높이가 아니라 특정 구간(예: 통로 하나)에만 놓을 수 있다.
+function buildVerticalBarrierSegments(x, w, yStart, yEnd, gaps) {
   const segments = [];
   const sorted = [...gaps].sort((a, b) => a.y - b.y);
-  let cursor = 0;
+  let cursor = yStart;
   for (const gap of sorted) {
     if (gap.y > cursor) segments.push({ x, y: cursor, w, h: gap.y - cursor });
-    cursor = gap.y + gap.h;
+    cursor = Math.max(cursor, gap.y + gap.h);
   }
-  if (cursor < height) segments.push({ x, y: cursor, w, h: height - cursor });
+  if (cursor < yEnd) segments.push({ x, y: cursor, w, h: yEnd - cursor });
   return segments;
 }
 
@@ -127,12 +130,13 @@ function loadZone(zoneId, spawnAt) {
 
   // floors(추가 바닥)/walls(추가 벽)는 각각 gaps만큼 구멍이 뚫린 채로 solidPlatforms에 합쳐진다 -
   // "제일 밑바닥 바닥" 하나뿐이던 것을 임의의 높이에 몇 개든 더 놓을 수 있게 일반화한 것 (§ 위 helper).
-  // 둘 다 zone def에 없으면(과거 존들처럼) 그냥 빈 배열이라 아무 영향 없음.
+  // xMin/xMax(floors)·yMin/yMax(walls)는 선택 사항 - 생략하면 존 전체 폭/높이에 걸침(기존 동작과 동일),
+  // 지정하면 좁은 통로나 방처럼 일부 구간에만 놓을 수 있다. 둘 다 zone def에 없으면 빈 배열이라 무영향.
   const floorSegments = (def.floors || []).flatMap((f) =>
-    buildHorizontalBarrierSegments(f.y, f.h, def.width, f.gaps || [])
+    buildHorizontalBarrierSegments(f.y, f.h, f.xMin ?? 0, f.xMax ?? def.width, f.gaps || [])
   );
   const wallSegments = (def.walls || []).flatMap((w) =>
-    buildVerticalBarrierSegments(w.x, w.w, def.height, w.gaps || [])
+    buildVerticalBarrierSegments(w.x, w.w, w.yMin ?? 0, w.yMax ?? def.height, w.gaps || [])
   );
 
   currentZone = {
