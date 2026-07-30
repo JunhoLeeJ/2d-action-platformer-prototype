@@ -27,22 +27,44 @@ function getRuleFlag(name) {
 // 기본값도 false로 시작 - 나중에 구역 5 재방문 시퀀스(미구현)에서 true로 바꿔주면 된다.
 let driftUnlocked = false;
 
-// xA와 xB 사이에 낙사 구간이 하나라도 걸쳐 있는지 - 체이서가 구멍 너머까지는 못 쫓아오게 하는 데 씀
+// xA와 xB 사이에 낙사 구간이 하나라도 걸쳐 있는지 - 체이서가 구멍 너머까지는 못 쫓아오게 하는 데 씀.
+// 일부러 "바닥"(groundGaps)만 본다 - 체이서는 발밑 지형만 보고 걷지, floors(§ 아래)로 만든 다른 층은
+// 애초에 지금 체이서 AI가 오갈 일이 없어서(체이서는 순찰 범위 안에서만 걷는다) 고려 대상이 아님.
 function hasGapBetween(xA, xB) {
   const lo = Math.min(xA, xB), hi = Math.max(xA, xB);
   return currentZone.groundGaps.some((gap) => gap.x < hi && gap.x + gap.w > lo);
 }
 
-// zone def의 groundGaps를 뺀 나머지 구간으로 바닥 조각들을 만듦
-function buildGroundSegments(def) {
+// 가로 막대(바닥/층) 하나를 gaps만큼 구멍 뚫어서 여러 조각으로 쪼갬 - buildGroundSegments(기존 바닥)와
+// zone.floors(§ 추가 층, 아래)가 이 함수 하나를 공유한다.
+function buildHorizontalBarrierSegments(y, h, width, gaps) {
   const segments = [];
-  const gaps = [...def.groundGaps].sort((a, b) => a.x - b.x);
+  const sorted = [...gaps].sort((a, b) => a.x - b.x);
   let cursor = 0;
-  for (const gap of gaps) {
-    if (gap.x > cursor) segments.push({ x: cursor, y: def.groundY, w: gap.x - cursor, h: def.groundH });
+  for (const gap of sorted) {
+    if (gap.x > cursor) segments.push({ x: cursor, y, w: gap.x - cursor, h });
     cursor = gap.x + gap.w;
   }
-  if (cursor < def.width) segments.push({ x: cursor, y: def.groundY, w: def.width - cursor, h: def.groundH });
+  if (cursor < width) segments.push({ x: cursor, y, w: width - cursor, h });
+  return segments;
+}
+// zone def의 groundGaps를 뺀 나머지 구간으로 바닥 조각들을 만듦 - "바닥"은 낙사 판정(FR-1.5 등)과
+// 체이서의 구멍 회피(hasGapBetween)에 쓰이는 유일한 특별한 층이라 다른 층(floors)과 분리되어 있다.
+function buildGroundSegments(def) {
+  return buildHorizontalBarrierSegments(def.groundY, def.groundH, def.width, def.groundGaps);
+}
+
+// 세로 막대(벽) 하나를 gaps(세로 구간)만큼 뚫어서 여러 조각으로 쪼갬 - buildHorizontalBarrierSegments를
+// 가로/세로 뒤집은 버전. zone.walls(§ 아래)가 사용.
+function buildVerticalBarrierSegments(x, w, height, gaps) {
+  const segments = [];
+  const sorted = [...gaps].sort((a, b) => a.y - b.y);
+  let cursor = 0;
+  for (const gap of sorted) {
+    if (gap.y > cursor) segments.push({ x, y: cursor, w, h: gap.y - cursor });
+    cursor = gap.y + gap.h;
+  }
+  if (cursor < height) segments.push({ x, y: cursor, w, h: height - cursor });
   return segments;
 }
 
@@ -57,6 +79,12 @@ function countAliveBehindGate(gate) {
 // 게이트 너머(spawnX > gate.x) 몬스터는 그 게이트가 잠긴 동안 "화면 밖"과 똑같이 플레이어를 인식 못 함
 function isBehindLockedGate(enemy) {
   return currentZone.wallGates.some((gate) => enemy.spawnX > gate.x && isGateLocked(gate));
+}
+// 게이트 충돌은 X 범위만 본다(트리거 존과 같은 이유 - "위아래로 아주 긴 판정 사각형"이라는 예전 방식은
+// 세로로 긴 존이 생기면서 y/h를 얼마나 크게 잡아야 안전한지 알기 어려워지는 문제가 있었다. Y를 아예
+// 안 보면 그 문제 자체가 사라짐). 렌더링용 visualY/visualH와는 완전히 분리된 별개의 판정.
+function isGateBlocking(gate, rect) {
+  return isGateLocked(gate) && rect.x + rect.w > gate.x && rect.x < gate.x + gate.w;
 }
 
 // 오른쪽 문(doors.right)을 "걸어 들어가면 페이드 후 다음 존으로 이동"하는 트리거로 변환.
@@ -97,9 +125,19 @@ function loadZone(zoneId, spawnAt) {
   const triggerZones = def.triggerZones.slice();
   if (def.doors.right) triggerZones.push(makeDoorTrigger(def.doors.right));
 
+  // floors(추가 바닥)/walls(추가 벽)는 각각 gaps만큼 구멍이 뚫린 채로 solidPlatforms에 합쳐진다 -
+  // "제일 밑바닥 바닥" 하나뿐이던 것을 임의의 높이에 몇 개든 더 놓을 수 있게 일반화한 것 (§ 위 helper).
+  // 둘 다 zone def에 없으면(과거 존들처럼) 그냥 빈 배열이라 아무 영향 없음.
+  const floorSegments = (def.floors || []).flatMap((f) =>
+    buildHorizontalBarrierSegments(f.y, f.h, def.width, f.gaps || [])
+  );
+  const wallSegments = (def.walls || []).flatMap((w) =>
+    buildVerticalBarrierSegments(w.x, w.w, def.height, w.gaps || [])
+  );
+
   currentZone = {
     ...def,
-    solidPlatforms: [...buildGroundSegments(def), ...def.solidPlatforms],
+    solidPlatforms: [...buildGroundSegments(def), ...floorSegments, ...wallSegments, ...def.solidPlatforms],
     cameraBounds: { minX: 0, maxX: def.width - W, minY: 0, maxY: def.height - H },
     triggerZones,
   };

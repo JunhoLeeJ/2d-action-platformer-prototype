@@ -42,7 +42,7 @@
 
 ### FR-2. 카메라
 - FR-2.1 화면 정중앙 기준 가로/세로 데드존(`CAMERA_DEADZONE_W`=160px, `CAMERA_DEADZONE_H`=140px) 안에서는 플레이어가 움직여도 카메라 고정 - 두 축이 서로 독립적으로 판정됨.
-- FR-2.2 데드존을 벗어나면 지수 감쇠(`1-e^(-CAMERA_SMOOTHING·dt)`, 계수 6)로 목표 위치를 부드럽게 추적. 프레임레이트 무관. 가로/세로 동일한 계수 공유.
+- FR-2.2 데드존을 벗어나면 지수 감쇠(`1-e^(-CAMERA_SMOOTHING_X/Y·dt)`)로 목표 위치를 부드럽게 추적. 프레임레이트 무관. 가로/세로 계수가 분리되어 있음(`CAMERA_SMOOTHING_X`=6, `CAMERA_SMOOTHING_Y`=11) - 세로가 더 커서 낙하 중에도 카메라가 눈에 띄게 뒤처지지 않음.
 - FR-2.3 카메라 X/Y는 각각 `[0, currentZone.width - 화면폭]` / `[0, currentZone.height - 화면높이]`로 클램프(존마다 독립된 크기). `height`가 `H`와 같은 존(현재 `f1z1_entry`/`f2z3_legacy_arena`)은 사실상 세로 스크롤이 없고, `height > H`인 존(`f1z2_platforms`)에서만 세로 스크롤이 실제로 일어남. 컷신 카메라 홀드 중(`cameraOverrideTarget` ≠ null)에는 데드존 없이 목표 지점으로 그대로 감쇠 추적 - target의 x/y는 각각 생략 가능(생략한 축은 현재 카메라 위치 유지).
 
 ### FR-3. 근접 공격
@@ -122,10 +122,12 @@
 - FR-10.9 근접 공격/표류 반격에 맞으면 스턴(`CHASER_STUN_DURATION`=0.5s, 스턴 면역 개체 제외) — `windup` 중이면 캔슬되어 `chase`로 되돌아감.
 
 ### FR-11. 레벨 지형 (현재 유일한 존 `f2z3_legacy_arena` 기준)
-- FR-11.1 존 폭 3840px(화면 폭의 약 2.7배). 바닥 y=500, 낙사 구멍 2곳(x=900±100, x=2350±120).
+- FR-11.1 존 폭 3840px(화면 폭의 약 2.7배), 존 높이 810px(세로 스크롤 없음, FR-2.3 참고). 바닥 y=750(존 높이에서 20px 여유만 남기고 거의 맞닿음 - CLAUDE.md "groundY + groundH" 참고), 낙사 구멍 2곳(x=900±100, x=2350±120).
 - FR-11.2 고정형 플랫폼 5개(바닥 제외) + 원웨이 플랫폼 9개로 수직 구간 구성.
-- FR-11.3 봉쇄 벽(x=1900, `zone.wallGates`의 원소 1개): 벽보다 스폰 쪽(`spawnX<1900`)에 살아있는 적이 하나라도 있으면 잠김 — 플레이어/체이서 모두 통과 불가(양방향 차단, 어떤 점프로도 우회 불가). 벽 너머 적은 벽이 잠긴 동안 "화면 밖"과 동일하게 플레이어를 인식하지 못함. 존 하나에 여러 게이트가 있을 수 있도록 일반화되어 있음(`isGateLocked`/`countAliveBehindGate`).
+- FR-11.3 봉쇄 벽(x=1900, `zone.wallGates`의 원소 1개): 벽보다 스폰 쪽(`spawnX<1900`)에 살아있는 적이 하나라도 있으면 잠김 — 플레이어/체이서 모두 통과 불가. 판정은 X 범위만 봄(`isGateBlocking`) - 세로 위치와 무관하게 항상 막혀서, 세로로 긴 존에서도 y/h를 따로 튜닝할 필요가 없음. 벽 너머 적은 벽이 잠긴 동안 "화면 밖"과 동일하게 플레이어를 인식하지 못함. 존 하나에 여러 게이트가 있을 수 있도록 일반화되어 있음(`isGateLocked`/`countAliveBehindGate`).
 - FR-11.4 존 왼쪽 끝에 배경용 문(트리거 없음), 오른쪽 끝 문은 다음 존으로의 트리거를 가질 수 있으나(`doors.right`) 이 존은 아직 `null` — 다음 존이 콘텐츠로 아직 존재하지 않음.
+- FR-11.5 `zone.floors`/`zone.walls`(선택 사항, 이 존은 둘 다 비어있음)로 기본 바닥 외에 임의 높이의 추가 바닥/벽을 놓을 수 있음 - 각각 `gaps`로 구멍을 뚫어 여러 조각으로 쪼갠 뒤 `solidPlatforms`에 합쳐짐. 세로로 긴 존에서 강제 지그재그 이동을 만들 때 쓰는 용도(`f1z2_platforms`의 타워 참고, FR-11.6).
+- FR-11.6 `f1z2_platforms` 존: 존 높이 1560px(바닥 y=1500 기준 20px 여유). 지상 계단(원웨이 발판 5개) 위에 `floors` 6개로 만든 강제 지그재그 타워가 이어짐 - 각 층은 폭 대부분을 막고 한쪽 끝(좌/우 번갈아)에만 250px 구멍을 남겨, 층을 오를 때마다 존 폭 대부분을 가로질러 반대쪽 구멍을 찾아야만 다음 층으로 갈 수 있음. 층간 간격 110px(한 번의 점프로 여유 있게 도달).
 
 ### FR-12. HP / 사망 / 리스폰
 - FR-12.1 `PLAYER_MAX_HP`=5. HP가 0 이하가 되면 `gameState="respawning"` 전환, `RESPAWN_DELAY`(1.2s) 후 현재 체크포인트(`currentCheckpoint`)로 복귀.
@@ -186,7 +188,7 @@ chaser: `patrolMinX,patrolMaxX,facing,aiState,attackTimer,stunTimer,perceptionTi
 | 적 공통 범위(포탑/저격수 기본값) | ENEMY_DEFAULT_DETECTION_RANGE_W/H (감지만 유한, leash/attackRange는 Infinity=무한 어그로) | 480/270 |
 | 포탑 | TURRET_FIRE_INTERVAL / TURRET_TELEGRAPH_DURATION / TURRET_MAX_HP / PROJECTILE_SPEED/RADIUS/DAMAGE | 2.2 / 0.5 / 5 / 260 / 8 / 1 |
 | 저격수 | (FR-9.1~9.5 값 전부 포탑과 공유) / SNIPER_PROJECTILE_RADIUS | - / 15 |
-| 카메라 | CAMERA_SMOOTHING / CAMERA_DEADZONE_W / CAMERA_DEADZONE_H | 6 / 160 / 140 |
+| 카메라 | CAMERA_SMOOTHING_X / CAMERA_SMOOTHING_Y / CAMERA_DEADZONE_W / CAMERA_DEADZONE_H | 6 / 11 / 160 / 140 |
 | 체이서 | CHASER_MAX_HP / PATROL_SPEED / CHASE_SPEED | 3 / 90 / 260 |
 | 체이서 범위 | DETECTION_RANGE / DETECTION_VERTICAL_RANGE / LEASH_RANGE / ATTACK_RANGE_W/H | 480 / 130 / 650 / 130/130 |
 | 체이서 타이밍 | ATTACK_TELEGRAPH_DURATION / ATTACK_RECOVERY_DURATION / ATTACK_DAMAGE / STUN_DURATION / PERCEPTION_INTERVAL | 0.65 / 0.6 / 2 / 0.5 / 0.1 |

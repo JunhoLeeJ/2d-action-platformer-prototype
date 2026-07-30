@@ -204,13 +204,23 @@ function checkAutoTrigger(zoneId) {
 
 // "playing" 상태에서 매 프레임 호출 - 걸어 들어가면 발동하는(walkIn) 트리거를 확인한다.
 // X 범위만 검사하고 세로는 아예 안 봐서(§ 존 트리거 도어 등) 어떤 점프로도 피할 수 없다.
+// yMin/yMax는 선택 사항 - 둘 다 생략하면 기존과 동일하게 X 범위만으로 판정(세로 위치 무관, 점프로
+// 못 피함이 그대로 유지). 세로로 여러 층이 있는 존에서 "이 트리거는 이 층에서만 의미가 있다"를
+// 표현할 때만 채운다. 위/아래를 비대칭으로 잡는 게 자연스럽다: yMin(위쪽 한계)은 넉넉하게(더 위에서도
+// 발동하도록 값을 작게) 잡고, yMax(아래쪽 한계)는 빡빡하게(그 층 바로 근처까지만) 잡아야, 트리거가
+// 놓인 층보다 훨씬 아래(다른 층)에서 걷다가 X만 맞아서 잘못 발동하는 일을 막으면서도, 위에서 살짝
+// 높이 떠서 접근하는 정도는 자연스럽게 허용된다.
 function scanTriggerZones() {
   for (const trigger of currentZone.triggerZones) {
     if (trigger.kind !== "walkIn") continue;
     const key = currentZone.id + ":" + trigger.id;
     if (!trigger.repeatable && seenTriggerIds.has(key)) continue;
-    const overlaps = player.x + player.w > trigger.xMin && player.x < trigger.xMax;
-    if (overlaps) {
+    const overlapsX = player.x + player.w > trigger.xMin && player.x < trigger.xMax;
+    if (!overlapsX) continue;
+    const overlapsY =
+      (trigger.yMin === undefined || player.y + player.h > trigger.yMin) &&
+      (trigger.yMax === undefined || player.y < trigger.yMax);
+    if (overlapsY) {
       fireTrigger(trigger, currentZone.id);
       return;
     }

@@ -225,9 +225,10 @@ function updatePlayer(dt) {
     }
   }
 
-  // 봉쇄 벽: 안쪽 몬스터가 다 죽기 전까지는 절대 통과 불가 (존에 게이트가 여러 개 있을 수 있음)
+  // 봉쇄 벽: 안쪽 몬스터가 다 죽기 전까지는 절대 통과 불가 (존에 게이트가 여러 개 있을 수 있음).
+  // X 범위만 판정(isGateBlocking) - 세로 위치와 무관하게 항상 막음, 세로로 긴 존에서도 안전.
   for (const gate of currentZone.wallGates) {
-    if (isGateLocked(gate) && rectsOverlap(player, gate)) {
+    if (isGateBlocking(gate, player)) {
       if (player.vx > 0) player.x = gate.x - player.w;
       else if (player.vx < 0) player.x = gate.x + gate.w;
       player.vx = 0;

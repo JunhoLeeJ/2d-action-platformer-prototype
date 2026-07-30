@@ -16,12 +16,14 @@ function snapCameraToPlayer() {
 }
 
 function updateCamera(dt) {
-  const smoothing = 1 - Math.exp(-CONFIG.CAMERA_SMOOTHING * dt);
+  // 가로/세로 감쇠 계수를 따로 둔다 - 세로(특히 낙하 중)가 가로보다 더 빠르게 따라잡아야 자연스러워서.
+  const smoothingX = 1 - Math.exp(-CONFIG.CAMERA_SMOOTHING_X * dt);
+  const smoothingY = 1 - Math.exp(-CONFIG.CAMERA_SMOOTHING_Y * dt);
 
   if (cameraOverrideTarget) {
     // 컷신 카메라 홀드: 데드존 없이 목표 지점으로 그대로 감쇠 추적 (플레이어 조작과 무관)
-    camera.x += (cameraOverrideTarget.x - camera.x) * smoothing;
-    camera.y += (cameraOverrideTarget.y - camera.y) * smoothing;
+    camera.x += (cameraOverrideTarget.x - camera.x) * smoothingX;
+    camera.y += (cameraOverrideTarget.y - camera.y) * smoothingY;
     camera.x = clamp(camera.x, currentZone.cameraBounds.minX, currentZone.cameraBounds.maxX);
     camera.y = clamp(camera.y, currentZone.cameraBounds.minY, currentZone.cameraBounds.maxY);
     return;
@@ -47,8 +49,8 @@ function updateCamera(dt) {
   else if (playerCenterY > bottomBound) targetY = playerCenterY - (H / 2 + halfDeadzoneH);
 
   // 지수 감쇠 lerp: 프레임레이트가 들쭉날쭉해도 동일한 체감 속도로 부드럽게 따라감
-  camera.x += (targetX - camera.x) * smoothing;
-  camera.y += (targetY - camera.y) * smoothing;
+  camera.x += (targetX - camera.x) * smoothingX;
+  camera.y += (targetY - camera.y) * smoothingY;
 
   // 존 경계를 벗어나지 않도록 고정 (존마다 독립된 폭/높이 - zones.js의 cameraBounds)
   camera.x = clamp(camera.x, currentZone.cameraBounds.minX, currentZone.cameraBounds.maxX);
