@@ -99,10 +99,10 @@ function drawMimeBProp(prop) {
 }
 
 // gyeolCaptured - 2층 구역 1(결 조우)에서 몬스터에게 둘러싸인 동안의 결(gyeol) 표시. 실제 동료
-// ghostNpc와는 별개의 순수 배경 장식(enemies[]/전투 판정과 무관) - 몬스터를 다 잡으면(§
-// f2z1_gyeol_encounter의 allEnemiesDead 트리거 콜백) 사라지고 그 자리를 ghostNpc가 대신한다.
-// 표정/세부 동작은 시도하지 않는다는 원칙(§ 5 아트 제약)이라 정지 자세 + 결박을 암시하는 가로 띠
-// 하나만 얹은 단순한 사각형.
+// ghostNpc와는 별개의 순수 배경 장식(enemies[]/전투 판정과 무관) - 존 진입 직후 트리거 콜백(§
+// f2z1_gyeol_encounter.js)에서 바로 지워지고 그 자리를 ghostNpc가 대신한다. 표정/세부 동작은
+// 시도하지 않는다는 원칙(§ 5 아트 제약)이라 정지 자세 + 결박을 암시하는 가로 띠 하나만 얹은 단순한
+// 사각형.
 function drawGyeolCapturedProp(prop) {
   drawRect(prop, "#d98a4a");
   ctx.fillStyle = "#7a4a24";

@@ -19,9 +19,7 @@
 // (1층→2층)" 작업 완료 - 원본 스펙엔 "층 이동 전용 컷신"이라고 되어 있었지만, CLAUDE.md의 "구조 관련
 // 확정 사항"대로 층 이동도 다른 문과 다를 것 없는 평범한 doors.right일 뿐이다(엔진이 이미 범용으로
 // 처리 - 새 엔진 기능 불필요, ROADMAP.md § 7 예상대로). "컷신이 이어진다"는 부분은 문 자체가 아니라
-// 2층 구역 1이 담당한다 - 그 존에 도착해도 결(gyeol)은 바로 안 나타나고 몬스터 3마리부터 처치해야
-// 하므로, 대사 시퀀스는 kind:"auto"가 아니라 새로 추가된 kind:"allEnemiesDead" 트리거(모든 몬스터가
-// 죽으면 자동 발동, js/engine/cutscene.js)를 쓴다 - f2z1_gyeol_encounter.js 참고.
+// 2층 구역 1이 담당한다 - f2z1_gyeol_encounter.js 참고.
 
 (function () {
   const groundY = 750, groundH = 40;

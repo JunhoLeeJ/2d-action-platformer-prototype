@@ -315,8 +315,12 @@ function checkAutoTrigger(zoneId) {
 // "playing" 상태에서 매 프레임 호출 - kind:"allEnemiesDead" 트리거를 확인한다. walkIn(위치)/auto(로드
 // 즉시)와 달리 "이 존에 스폰된 몬스터가 전부 죽었는지"를 폴리해서 발동하는 세 번째 종류 - wallGates가
 // "게이트 앞쪽에 살아있는 적이 있는지"를 매 프레임 폴링하는 것과 같은 정신을, 이동을 막는 대신 스토리
-// 비트를 트는 데 쓴 것. 2층 구역 1(결 조우 - "몬스터 3마리에 둘러싸임" → 다 잡으면 대사)에서 처음
-// 필요해짐. 존 하나에 이 kind는 하나만 두는 걸 전제로 설계됨(여러 개면 전부 같은 조건이라 의미 없음).
+// 비트를 트는 데 씀. 2층 구역 1(결 조우)에서 처음 만들었지만, 그 몬스터 전투는 이후 사용자 결정으로
+// "플레이어가 직접 잡는 게 아니라 컷신으로 처리"하는 쪽으로 바뀌어서 지금은 그 존이 이 kind를 안 쓴다
+// (auto 트리거 + 플레이스홀더 컷신으로 대체됨 - f2z1_gyeol_encounter.js, LATER.md 참고). 이 함수/kind
+// 자체는 지워지지 않고 남아있음 - 2층 구역 4 보스전("처치 시 컷신")이 정확히 같은 패턴(몬스터를 실제로
+// 잡으면 스토리 비트 발동)을 쓸 예정이라 그때 재사용할 것. 존 하나에 이 kind는 하나만 두는 걸 전제로
+// 설계됨(여러 개면 전부 같은 조건이라 의미 없음).
 function checkAllEnemiesDeadTrigger() {
   const trigger = currentZone.triggerZones.find((t) => t.kind === "allEnemiesDead");
   if (!trigger) return;
