@@ -581,6 +581,32 @@ mimeA처럼 `enemies[]`에(기존 AI 재사용 가능하면 재스킨), 순수 �
   바로 재피격당할 수 있다 - `f2z3_legacy_arena`의 `SPAWN_SAFE_OFFSET` 상수(레벨 전체 콘텐츠를
   균일하게 밀어서 상대 배치를 안 깨고 안전 거리만 늘리는 방식)가 재사용 가능한 패턴. CLAUDE.md에
   정식 반영됨 - 사용자가 명시적으로 "앞으로의 모든 구역"에 적용하라고 요청함.
+- (다음 세션 - 체크포인트 마무리 4건) 위 체크포인트 작업 직후 사용자가 발견한 네 가지 문제를 전부 수정:
+  1. **체크포인트를 찍으면 체력이 풀로 회복되지 않았음** - `activateCheckpoint()`(`js/engine/checkpoint.js`)
+     에 `player.hp = player.maxHp`/`timeSinceHit` 리셋을 추가. `resetPlayerVitals()`처럼 통째로 리셋하지
+     않고 체력만 좁게 건드린 이유: 체크포인트는 전투 도중에도 스칠 수 있어서 attackState/표류까지
+     리셋하면 스윙이 뜬금없이 캔슬된다. 문 전환의 `resetPlayerVitals()` 힐은 사용자가 "지우기 귀찮으면
+     그냥 놔둬도 된다"고 확인해서 그대로 둠(중복 적용돼도 무해).
+  2. **체크포인트 트리거존을 점프로 지나가면 공중에서 캔슬당해 강제로 떨어졌음** - `fireTrigger()`
+     (`js/engine/cutscene.js`)가 모든 트리거에 걸던 "공중이면 착지부터" 접두사(`makeFallUntilGroundedTick`)
+     를 체크포인트 트리거만 건너뛰도록 `trigger.skipGroundedPrefix` 플래그를 추가(`makeCheckpointTrigger`
+     가 세팅). 사용자 요청: "공중에서도 체크포인트가 활성화된다 이 정도면 충분해."
+  3. **문앞 체크포인트가 활성 상태로 죽으면 기둥이 아니라 문으로 리스폰됐음** - `f2z2_checkpoint`/
+     `f2z3_legacy_arena`의 "start" 체크포인트가 `checkpoints[]`/`makeCheckpointTrigger` 양쪽에 문 위치
+     (x=40)를 그대로 쓰고 있던 예전 코드 잔재(기둥이 생기기 전 흔적) - 둘 다 기둥 자신의 x
+     (`pillarX`/`startPillarX`)로 고침. `past_gate`는 처음부터 `gatePillarX`를 썼어서 버그가 없었음
+     (사용자가 "중간 체크포인트는 잘 되어있는데"라고 확인한 이유).
+  4. **게이트 뒤 체크포인트에서 죽었다 살아나면(게이트 재잠김) 적 인식이 뒤집혔음** - 예전
+     `isBehindLockedGate(enemy)`는 "플레이어는 항상 게이트 왼쪽(스폰 쪽)"이라고 가정해서, 게이트
+     오른쪽(플레이어가 실제로 서 있는 쪽) 몬스터는 인식을 못 하고 왼쪽(못 넘어가는 쪽) 몬스터는
+     오히려 인식해버리는 정반대 버그였음. 사용자가 제안한 더 나은 방식으로 교체: 인식/어그로는
+     게이트와 무관하게 순수 거리 기준으로 항상 정상 작동하고, 대신 게이트가 잠긴 동안은 그 위치가
+     투사체(`updateProjectiles`)와 체이서 근접 공격의 데미지 판정(`isLockedGateBetween`,
+     `updateChaserAI`)을 실제로 막는 벽이 됨 - 체이서 몸도 `resolveGateCollisionX`로 게이트 면에
+     붙어 멈춘다("벽까지는 공격을 하되 벽을 넘기는 공격은 못하게"). 게이트가 열리면 그 즉시(다음
+     프레임부터) 다시 자유롭게 뚫고 지나감. `isBehindLockedGate`는 완전히 삭제됨 - 자세한 내용은
+     CLAUDE.md "Wall gates" 항목 참고. Playwright로 5가지 항목(HP 회복/공중 활성화/리스폰 좌표/
+     게이트 잠금-거리 판정/투사체·체이서 차단+재개방) 전부 실동작 검증 완료.
 
 ## 7. 다음 작업 순서 제안
 

@@ -289,6 +289,9 @@ function updateChaserAI(enemy, dt) {
       enemy.attackTimer = CONFIG.CHASER_ATTACK_TELEGRAPH_DURATION;
     } else {
       enemy.x += dir * CONFIG.CHASER_CHASE_SPEED * dt;
+      // 잠긴 게이트는 플레이어처럼 체이서도 몸으로 못 뚫는다 - 안 그러면 게이트 반대편까지 몸으로
+      // 파고들어 온 채로 서 있게 된다(공격 데미지만 막아서는 시각적으로 벽을 뚫고 서 있는 것처럼 보임).
+      resolveGateCollisionX(enemy, dir);
     }
     return;
   }
@@ -299,7 +302,12 @@ function updateChaserAI(enemy, dt) {
     enemy.attackTimer -= dt;
     if (enemy.attackTimer <= 0) {
       const hitbox = getChaserAttackHitbox(enemy);
-      if (rectsOverlap(hitbox, player)) {
+      // 잠긴 게이트가 둘 사이에 있으면(사용자 요청: "벽까지는 공격을 하되 벽을 넘기는 공격은 못하게")
+      // 스윙 자체(예고/애니메이션)는 그대로 재생되지만 데미지는 들어가지 않는다 - 벽 너머로 판정만
+      // 새는 것을 막을 뿐, 몸은 이미 resolveGateCollisionX로 게이트 면에 붙어 멈춰있으므로 "벽까지는
+      // 다가와서 휘두른다"는 그림 자체는 자연스럽게 유지된다.
+      const blockedByGate = isLockedGateBetween(enemy.x + enemy.w / 2, player.x + player.w / 2);
+      if (!blockedByGate && rectsOverlap(hitbox, player)) {
         damagePlayer(CONFIG.CHASER_ATTACK_DAMAGE);
       }
       enemy.aiState = "recovery";
@@ -348,8 +356,12 @@ function updateEnemies(dt) {
     tickHpRegen(enemy, dt, "enemyHpRegenDelay"); // enemyHpRegenDelay가 걸린 존(f1z3 등)에서만 실제로 발동 - 그 외엔 즉시 return
 
     // 화면에 한 번이라도 들어온 적이 있는지 기록 (한 번 보이고 나면 이후 화면 밖으로 나가도 계속 유지).
-    // 단, 봉쇄 벽 너머의 몬스터는 벽이 잠긴 동안은 화면에 보여도 "안 보인 것"으로 취급.
-    if (!enemy.hasBeenVisible && isInCameraView(enemy) && !isBehindLockedGate(enemy)) {
+    // 봉쇄 벽과는 이제 무관하다 - 예전엔 벽 너머 몬스터는 잠긴 동안 "안 보인 것"으로 쳤지만, 그
+    // 판정이 "플레이어는 항상 게이트 왼쪽에 있다"고 가정해서 게이트 뒤 체크포인트에서 되살아나는
+    // 경우 인식이 뒤집히는 버그가 있었다(사용자 피드백, zones.js의 isLockedGateBetween 주석 참고).
+    // 이제 인식/어그로는 순수 거리 기준으로만 판정하고, 게이트는 대신 공격(투사체/근접)이 뚫고
+    // 지나가지 못하게만 막는다.
+    if (!enemy.hasBeenVisible && isInCameraView(enemy)) {
       enemy.hasBeenVisible = true;
     }
 
@@ -369,6 +381,15 @@ function updateProjectiles(dt) {
     p.y += p.vy * dt;
 
     if (p.x < -50 || p.x > currentZone.width + 50 || p.y < -50 || p.y > currentZone.height + 50) {
+      projectiles.splice(i, 1);
+      continue;
+    }
+
+    // 잠긴 게이트에 닿으면 그 자리에서 소멸 - 벽에 맞은 것처럼 처리한다(사용자 요청: "투사체가 봉쇄
+    // 구역을 뚫지 못하게"). unblockable 여부와 무관하게 항상 막힌다 - unblockable은 "표류로 못 쳐낸다"는
+    // 뜻이지 "벽도 뚫는다"는 뜻이 아니다. 게이트가 열리면 isGateBlocking이 즉시 false가 되어 그 즉시
+    // 다시 자유롭게 지나간다.
+    if (currentZone.wallGates.some((gate) => isGateBlocking(gate, { x: p.x - p.r, w: p.r * 2 }))) {
       projectiles.splice(i, 1);
       continue;
     }

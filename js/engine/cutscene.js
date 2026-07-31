@@ -290,7 +290,9 @@ function fireTrigger(trigger, zoneId) {
   // makeFallUntilGroundedTick(js/engine/zones.js)이 미리 정해진 landingY 없이도
   // resolveSolidVerticalCollisions/resolveOneWayVerticalCollisions(player.js)의 "위에서 떨어져 착지"
   // 판정에 기대어 범용으로 동작한다.
-  const finalEvents = player.onGround
+  // skipGroundedPrefix(현재 체크포인트 트리거만 씀 - zones.js의 makeCheckpointTrigger 참고): 이
+  // 트리거는 공중에서 발동해도 착지 연출 없이 그 자리에서 그대로 처리되어야 하는 예외.
+  const finalEvents = (player.onGround || trigger.skipGroundedPrefix)
     ? events
     : [{ type: "custom", tick: makeFallUntilGroundedTick() }, ...events];
   startSequence(finalEvents);

@@ -95,15 +95,41 @@ function isGateLocked(gate) {
 function countAliveBehindGate(gate) {
   return enemies.filter((e) => e.spawnX < gate.x && e.alive).length;
 }
-// 게이트 너머(spawnX > gate.x) 몬스터는 그 게이트가 잠긴 동안 "화면 밖"과 똑같이 플레이어를 인식 못 함
-function isBehindLockedGate(enemy) {
-  return currentZone.wallGates.some((gate) => enemy.spawnX > gate.x && isGateLocked(gate));
-}
 // 게이트 충돌은 X 범위만 본다(트리거 존과 같은 이유 - "위아래로 아주 긴 판정 사각형"이라는 예전 방식은
 // 세로로 긴 존이 생기면서 y/h를 얼마나 크게 잡아야 안전한지 알기 어려워지는 문제가 있었다. Y를 아예
 // 안 보면 그 문제 자체가 사라짐). 렌더링용 visualY/visualH와는 완전히 분리된 별개의 판정.
 function isGateBlocking(gate, rect) {
   return isGateLocked(gate) && rect.x + rect.w > gate.x && rect.x < gate.x + gate.w;
+}
+
+// xA/xB 사이에 "지금 잠겨있는" 게이트가 하나라도 걸쳐 있는지 - hasGapBetween(§ 위)과 같은 모양의
+// 헬퍼. 봉쇄 벽 너머의 몬스터가 플레이어를 아예 인식조차 못 하게 막던 예전 isBehindLockedGate()를
+// 대체한다: 죽었다가 게이트 뒤쪽 체크포인트에서 되살아나면 게이트가 다시 잠기는데(몬스터가 새로
+// 생성되며 살아나므로), 그 낡은 판정은 "플레이어는 항상 게이트 스폰 쪽(왼쪽)에 있다"고 가정해서
+// 게이트 반대편(플레이어가 실제로 서 있는 쪽)의 몬스터는 인식을 못 하고, 반대로 게이트 안쪽(플레이어가
+// 못 넘어가는 쪽)의 몬스터는 여전히 인식해버리는 정반대 버그가 있었다(사용자 피드백으로 발견).
+// 사용자가 명시적으로 요청한 더 나은 방식: 인식/어그로는 게이트와 무관하게 순수 거리 기준으로 항상
+// 정상 작동시키고(그래서 이 함수는 이제 "인식 여부"가 아니라 "공격이 게이트를 뚫고 들어가는지"에만
+// 쓰인다), 대신 게이트가 잠긴 동안은 그 게이트의 x 위치를 실제로 뚫을 수 없는 벽으로 만들어서
+// 투사체(updateProjectiles, enemies.js)와 근접 공격의 데미지 판정(updateChaserAI)이 게이트를 넘어
+// 명중하지 못하게 막는다 - 게이트가 열리면(isGateLocked가 false가 되는 즉시) 이 판정도 자동으로
+// 사라져서 그 자리로 다시 자유롭게 공격이 오갈 수 있다.
+function isLockedGateBetween(xA, xB) {
+  const lo = Math.min(xA, xB), hi = Math.max(xA, xB);
+  return currentZone.wallGates.some((gate) => isGateLocked(gate) && gate.x + gate.w > lo && gate.x < hi);
+}
+
+// 잠긴 게이트에 몸으로 부딪혔을 때 그 면에 붙여 멈추게 한다 - updatePlayer의 X축 게이트 충돌
+// (isGateBlocking 사용)과 동일한 정신을, 몬스터(체이서 추적 이동)에도 적용한 것. moveDir(이번
+// 프레임에 움직인 방향의 부호)로 어느 면에 붙여야 하는지 정한다 - 안 그러면 체이서가 게이트를 몸으로
+// 뚫고 들어가 반대편 플레이어에게 바짝 붙어버려서, 공격 데미지만 막아봐야(isLockedGateBetween) 시각적
+// 으로는 이미 벽을 뚫고 서 있는 것처럼 보이는 문제가 생긴다.
+function resolveGateCollisionX(entity, moveDir) {
+  for (const gate of currentZone.wallGates) {
+    if (!isGateBlocking(gate, entity)) continue;
+    if (moveDir > 0) entity.x = gate.x - entity.w;
+    else if (moveDir < 0) entity.x = gate.x + gate.w;
+  }
 }
 
 // 트리거 발동 순간 플레이어가 아직 공중(점프 중)이었을 때, 조작권을 뺏은 채 제자리(가로 고정)에서
@@ -253,6 +279,12 @@ function makeCheckpointTrigger(opts) {
     yMin: (opts.topY !== undefined ? opts.topY : opts.standingTopY) - 350,
     yMax: opts.standingTopY + 25,
     repeatable: true, // 체크포인트는 몇 번을 다시 밟아도(재방문 포함) 매번 다시 적용되어야 한다(사용자 요청)
+    // 문과 달리 체크포인트는 "공중에서 밟아도 그냥 그 자리에서 활성화되면 충분하다"(사용자 요청) -
+    // 조작권을 뺏고 강제로 착지시키는 연출이 필요 없다. fireTrigger()(cutscene.js)가 이 플래그를 보고
+    // 모든 트리거에 기본 적용되는 makeFallUntilGroundedTick 접두사를 이 트리거에 한해 생략한다.
+    // 안 그러면 점프로 이 트리거의 (일부러 넉넉하게 잡은 세로) 판정 범위를 스쳐 지나가기만 해도
+    // 점프 궤적이 뚝 끊기고 바닥까지 강제로 떨어뜨려져서, "점프로 못 지나가는" 것처럼 느껴지는 문제가 있었다.
+    skipGroundedPrefix: true,
     sequence: () => {
       const activateEvent = {
         type: "callback",

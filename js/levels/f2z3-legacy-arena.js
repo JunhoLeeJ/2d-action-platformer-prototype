@@ -134,7 +134,10 @@
     checkpoints: [
       // active 기본값은 둘 다 false - enterZone()이 더 이상 이 값을 안 건드리므로, 실제로 기둥을
       // 만지기 전까지는 이 정적 초기값이 그대로 남아있는다(f2z2_checkpoint와 동일한 이유).
-      { id: START_CHECKPOINT_ID, x: 40, y: standingTopY, active: false },
+      // start의 x는 기둥(startPillarX) 자신의 위치 - 예전엔 문 위치(40)를 그대로 썼는데, 그러면 이
+      // 체크포인트가 활성 상태로 죽었을 때 기둥이 아니라 문 앞으로 리스폰되는 버그가 있었다(사용자
+      // 피드백으로 발견). past_gate는 처음부터 gatePillarX를 썼으므로 이 버그가 없었음.
+      { id: START_CHECKPOINT_ID, x: startPillarX, y: standingTopY, active: false },
       { id: GATE_CHECKPOINT_ID, x: gatePillarX, y: standingTopY, active: false },
     ],
 
@@ -152,7 +155,7 @@
       makeCheckpointTrigger({
         zoneId: "f2z3_legacy_arena",
         checkpointId: START_CHECKPOINT_ID,
-        x: 40, y: standingTopY,
+        x: startPillarX, y: standingTopY,
         xMin: startPillarX - 20, xMax: startPillarX + pillarW + 20,
         topY: startPillarY,
         standingTopY,

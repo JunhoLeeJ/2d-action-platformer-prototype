@@ -71,7 +71,11 @@
       // active 기본값은 false - enterZone()이 더 이상 이 값을 안 건드리므로, 실제로 기둥을 만지기
       // 전까지는 이 정적 초기값이 그대로 남아있는다. true로 박아두면 "만지기 전엔 안 빛난다"는
       // 규칙이 깨진다 - 실제로 겪은 버그.
-      { id: CHECKPOINT_ID, x: 40, y: standingTopY, active: false },
+      // x는 기둥(pillarX) 자신의 위치 - 예전엔 문 위치(40)를 그대로 썼는데, 그러면 이 체크포인트가
+      // 활성 상태로 죽었을 때 기둥이 아니라 문 앞으로 리스폰되는 버그가 있었다(사용자 피드백으로 발견 -
+      // "죽으면 체크포인트가 아니라 문으로 돌아온다"). 기둥이 곧 "실제로 밟은 자리"이므로 리스폰 좌표도
+      // 그 자리와 일치해야 한다.
+      { id: CHECKPOINT_ID, x: pillarX, y: standingTopY, active: false },
     ],
 
     doors: {
@@ -88,7 +92,7 @@
       makeCheckpointTrigger({
         zoneId: "f2z2_checkpoint",
         checkpointId: CHECKPOINT_ID,
-        x: 40, y: standingTopY,
+        x: pillarX, y: standingTopY,
         xMin: pillarX - 20, xMax: pillarX + pillarW + 20,
         topY: pillarY,
         standingTopY,

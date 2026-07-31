@@ -20,4 +20,10 @@ function activateCheckpoint(zoneId, x, y, checkpointId) {
   for (const zid in ZONES) {
     for (const cp of ZONES[zid].checkpoints) cp.active = zid === zoneId && cp.id === checkpointId;
   }
+  // 사용자 요청: "체크포인트를 찍을 때는 체력을 풀로 회복시켜줘." 문 전환/워프의 resetPlayerVitals()
+  // (player.js)와 달리 여기서는 HP/피격 타이머만 건드린다 - attackState/표류/속도까지 통째로 리셋하면
+  // 전투 도중 체크포인트를 스쳐 지나가는 상황(예: 근접 체크포인트를 밟으며 몬스터와 싸우는 중)에
+  // 스윙/표류가 뜬금없이 캔슬돼버리는 부작용이 생긴다 - 체력 회복은 그 문제가 없으므로 범위를 좁혀서만 적용.
+  player.hp = player.maxHp;
+  player.timeSinceHit = Infinity;
 }
