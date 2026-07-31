@@ -65,11 +65,13 @@
       { id: "start", x: 40, y: standingTopY, active: true }, // 2층의 첫 체크포인트
     ],
 
-    // 오른쪽 문은 아직 없음(의도적) - 2층 구역 2(체크포인트)가 아직 없어서 이을 곳이 없다. f1z6에서
-    // 이미 한 번 쓴 패턴 그대로: QA 패널로는 바로 확인 가능하고, 2층 구역 2를 만들 때 doors.right만
-    // 채우면 됨(CLAUDE.md "구조 관련 확정 사항" 참고 - 엔진 차원 추가 작업 불필요).
+    // 오른쪽 문 - 2층 구역 2(체크포인트)로 연결. 다른 모든 문과 동일한 관례(yMax/landingY) 그대로.
     doors: {
       left: { x: 40, y: groundY - doorH, w: 40, h: doorH },
+      right: {
+        x: 1320, y: groundY - doorH, w: 40, h: doorH,
+        targetZoneId: "f2z2_checkpoint", yMax: standingTopY + 25, landingY: groundY,
+      },
     },
 
     // auto 트리거 - 존 진입 즉시 발동. 대사 4줄(+ 아래 삽입된 대사 없는 "..." 한 줄)은 ROADMAP.md

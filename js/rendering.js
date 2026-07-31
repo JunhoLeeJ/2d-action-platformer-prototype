@@ -163,6 +163,31 @@ function drawFragmentObjectProp(prop) {
   ctx.restore();
 }
 
+// checkpointPillar - 매듭 묶인 체크포인트 기둥(2층 구역 2에서 처음 등장, ROADMAP.md 참고). "켜짐"
+// 여부를 prop 데이터에 저장하지 않고 hasSeenTrigger(currentZone.id, prop.triggerId)를 매 프레임 직접
+// 확인한다 - door.crackWhen()과 같은 이유(ambientProps는 로드 시점에 캐싱되지만 활성화는 같은 방문
+// 도중 일어날 수 있어 그 순간 바로 반영되려면 매 프레임 다시 물어야 함). 켜지기 전엔 무채색 나무
+// 기둥, 켜진 뒤엔 매듭 부분만 청록색으로 은은하게 펄스 - crackMark/fragmentObject/driftAbsorb와 같은
+// 파란빛 팔레트(#7fd3ff)를 재사용해 "이 게임에서 빛나는 것은 전부 이 색"이라는 시각적 일관성을 유지.
+function drawCheckpointPillarProp(prop) {
+  drawRect(prop, "#5a4632"); // 기둥 본체 - 무채색 나무
+  const knotCx = prop.x + prop.w / 2, knotCy = prop.y + prop.h * 0.3, knotR = prop.w * 0.55;
+  const lit = hasSeenTrigger(currentZone.id, prop.triggerId);
+  ctx.save();
+  if (lit) {
+    const pulse = (Math.sin(performance.now() / 500 + prop.x) + 1) / 2;
+    ctx.shadowColor = "#7fd3ff";
+    ctx.shadowBlur = 6 + pulse * 8;
+    ctx.fillStyle = "#7fd3ff";
+  } else {
+    ctx.fillStyle = "#3a2e20";
+  }
+  ctx.beginPath();
+  ctx.arc(knotCx, knotCy, knotR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 // driftAbsorb - crackMark 흡수 애니메이션(cutscene.js의 "driftAbsorb" 이벤트가 driftAbsorbAnim을
 // 매 프레임 갱신, 여기서는 그리기만 함). fragmentObject와 같은 다이아몬드 반짝이 모양을 재사용하되,
 // 시작 위치에서 플레이어 중심까지 서서히 빨려들어가듯 이동하며 작아지고 옅어진다 - "[V] 표류를
@@ -284,6 +309,7 @@ function draw() {
     else if (prop.type === "fragmentObject") drawFragmentObjectProp(prop);
     else if (prop.type === "crackMark") drawCrackMarkProp(prop);
     else if (prop.type === "gyeolCaptured") drawGyeolCapturedProp(prop);
+    else if (prop.type === "checkpointPillar") drawCheckpointPillarProp(prop);
   }
 
   // 표류 흡수 애니메이션(cutscene.js "driftAbsorb" 이벤트) - 월드 좌표계라 이 안(카메라 translate)에서 그림
