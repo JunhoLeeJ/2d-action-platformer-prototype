@@ -8,12 +8,28 @@ let currentCheckpoint = null;
 // 체크포인트 하나가 "회복"을 이미 한 번 내준 적이 있는지 - zoneId:checkpointId로 키를 잡는다
 // (seenTriggerIds, js/engine/cutscene.js와 동일한 "한 번뿐" Set 패턴). 사용자 요청: "한번 체력을 채운
 // 체크포인트에서는 다시 체력을 채울 수 없음" - 안 그러면 체크포인트 바로 옆에서 몬스터를 살짝 맞고
-// 돌아와 회복하고 다시 나가 맞고 돌아오는 식으로 사실상 무한 회복이 가능해진다. 이 Set은 세션 내내
-// 유지되며 절대 지워지지 않는다 - 한 번 회복을 내준 체크포인트는 그 세션에서 다시는 회복을 안 준다.
+// 돌아와 회복하고 다시 나가 맞고 돌아오는 식으로 사실상 무한 회복이 가능해진다.
 // 죽어서 리스폰할 때의 회복(resetPlayerVitals, player.js)은 이 제한과 완전히 무관하다 - respawnPlayer는
 // activateCheckpoint를 호출하지 않고 항상 무조건 풀피로 되돌리므로, 이 Set은 오직 "살아있는 채로
 // 체크포인트를 다시 밟았을 때"의 추가 회복만 막는다.
+//
+// 이 Set은 "그 존을 계속 이어서 플레이하는 동안"만 유지된다 - 존을 처음부터 다시 들어오면(문 전환이든
+// QA 패널의 구역 선택 워프든, 둘 다 zones.js의 enterZone() 공유) 그 존의 체크포인트들에 한해 리셋된다
+// (§ 아래 resetHealedCheckpointsForZone). 사용자 설명: "구역 선택을 통해 다시 왔다는 뜻은 그냥 처음부터
+// 다시 온 거니까 한 번 힐 리셋해줘도 되는" 것 - "무한 회복 방지"라는 원래 목적은 "같은 방문 안에서"
+// 왔다갔다하며 무한 회복하는 것만 막으면 충분하고, 방문 자체가 완전히 새로 시작되면 이 제한도 같이
+// 새로 시작되는 게 맞기 때문.
 const healedCheckpointIds = new Set();
+
+// zoneId로 시작하는 healedCheckpointIds 키만 지운다 - 다른 존의 기록은 안 건드림. enterZone()
+// (js/engine/zones.js)이 호출한다 - 아직 한 번도 방문 안 한 존이면 지울 게 없어서 아무 효과 없이
+// 안전하게 no-op(문을 통한 평범한 최초 진입에도 그냥 항상 불러도 무해함).
+function resetHealedCheckpointsForZone(zoneId) {
+  const prefix = zoneId + ":";
+  for (const key of healedCheckpointIds) {
+    if (key.startsWith(prefix)) healedCheckpointIds.delete(key);
+  }
+}
 
 // 스토리 트리거(첫 체크포인트)든 근접 자동 감지(이후 체크포인트)든 결국 이 함수 하나를 호출하면 된다.
 // 존 정의에 붙은 checkpoint 오브젝트의 active 표시도 여기서 갱신 - respawnPlayer가

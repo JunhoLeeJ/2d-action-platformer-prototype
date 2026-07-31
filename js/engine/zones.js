@@ -380,4 +380,7 @@ function enterZone(zoneId) {
   const def = ZONES[zoneId];
   loadZone(zoneId, def.entryPoint);
   resetPlayerVitals();
+  // 존에 "처음부터 다시" 들어오는 것이므로, 이 존 체크포인트들의 "한 번만 힐" 제한도 같이 리셋한다
+  // (js/engine/checkpoint.js의 resetHealedCheckpointsForZone 주석 참고 - 사용자 요청).
+  resetHealedCheckpointsForZone(zoneId);
 }
