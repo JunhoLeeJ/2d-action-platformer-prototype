@@ -95,12 +95,17 @@
     user-select: none;
     z-index: 1;
   }
-  /* 컷신 텍스트박스 - 화면 하단, 인물 이름(있으면) + 대사. 클릭/키 입력으로 다음 줄 진행(cutscene.js). */
+  /* 컷신 텍스트박스 - 화면 하단, 인물 이름(있으면) + 대사. 클릭/키 입력으로 다음 줄 진행(cutscene.js).
+     bottom: 10px - js/rendering.js가 매 프레임 그리는 화면 하단 검은 대사 바(높이는
+     CONFIG.WORLD_VIEW_Y_SHIFT+20 = getDialogueBarHeight() 참고, 지금 100px) 안에 들어오도록 맞춘
+     값 - 대사가 있든 없든 그 바는 항상 보이고, 이 박스는 그 위에 얹히는 실제 텍스트일 뿐이다. 캐릭터가
+     바닥 근처에 있어도 게임 화면 자체가 그만큼 위로 밀려 올라가 있어서(같은 파일의 WORLD_VIEW_Y_SHIFT
+     적용 부분) 이 박스가 캐릭터를 가리지 않는다(사용자 피드백으로 추가된 레이아웃). */
   #cutsceneBox {
     position: absolute;
     left: 5%;
     right: 5%;
-    bottom: 24px;
+    bottom: 10px;
     background: rgba(0,0,0,0.72);
     border: 2px solid #eee;
     border-radius: 6px;

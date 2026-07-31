@@ -213,6 +213,17 @@ function drawScreenGlitch(intensity) {
   ctx.fillRect(0, 0, W, H);
 }
 
+// 화면 하단 대사 바의 높이 - CONFIG.WORLD_VIEW_Y_SHIFT(게임 화면을 위로 밀어올리는 양)에서 항상
+// 파생시킨다(getDriftCooldownOnCounter 등과 같은 "값이 하나로부터 도출되면 별도 상수로 안 둔다"
+// 관례, CLAUDE.md 참고) - 모든 존이 지키는 "groundY+groundH가 zone.height보다 20px 낮다"는 관례
+// 때문에, 카메라가 맨 아래(바닥이 보이는 위치)에 있을 때 바닥 밑면은 항상 화면 좌표 H-20에 그려진다.
+// 화면을 WORLD_VIEW_Y_SHIFT만큼 올리면 바닥 밑면이 H-20-WORLD_VIEW_Y_SHIFT로 이동하므로, 바의
+// 윗변(H-바높이)이 정확히 그 자리와 맞아떨어지려면 바높이 = WORLD_VIEW_Y_SHIFT + 20이어야 한다 -
+// 안 그러면 밀어올려진 게임 화면과 대사 바 사이에 배경색만 보이는 빈 틈(이음매)이 생긴다.
+function getDialogueBarHeight() {
+  return CONFIG.WORLD_VIEW_Y_SHIFT + 20;
+}
+
 function draw() {
   ctx.clearRect(0, 0, W, H);
 
@@ -225,8 +236,11 @@ function draw() {
   // 플레이어/적/투사체/지형처럼 카메라를 따라 스크롤되어야 하는 것만 이 블록 안에 넣을 것.
   // (반대로 HP바/조작안내/쿨다운 게이지/리스폰 문구/컷신 텍스트박스/페이드는 canvas가 아니라 HTML
   //  오버레이라서 애초에 카메라 영향을 받지 않음 - updateHud()/cutscene.js 쪽 참고)
+  // -CONFIG.WORLD_VIEW_Y_SHIFT만큼 추가로 밀어올려서, 캐릭터가 바닥 근처에 있어도 항상 아래
+  // 대사 바(§ 위 getDialogueBarHeight) 위에 여유 공간을 두고 보이게 한다(사용자 피드백 - 대사창이
+  // 바닥 근처 캐릭터를 가리는 문제).
   ctx.save();
-  ctx.translate(-camera.x, -camera.y);
+  ctx.translate(-camera.x, -camera.y - CONFIG.WORLD_VIEW_Y_SHIFT);
 
   // 지형 - 고정형(완전 차단)은 회색, 원웨이(관통형)는 청록색 + 상단에 밝은 선으로 구분
   for (const s of currentZone.solidPlatforms) drawRect(s, "#555b6e");
@@ -491,6 +505,14 @@ function draw() {
     }
     ctx.fillRect(0, 0, W, H);
   }
+
+  // 화면 하단 대사 바 - 대사가 없을 때도 항상 검게 채워둔다("평소엔 그냥 검은색" - 사용자 피드백).
+  // 맵 배경색(#2b2f3a)과 다른 순수 검정이라 "여기는 UI 영역"이라는 경계가 분명하게 보임. 다른 화면
+  // 틴트(피격 유예/표류/타임스톱)보다 나중에 그려서 그 위에 항상 얹힘 - 틴트가 이 바까지 물들이면
+  // "UI 영역"이라는 경계가 흐려지기 때문. 대사 텍스트박스(#cutsceneBox, index.html DOM 오버레이)는
+  // 이 바로 이 영역 안에 들어오도록 CSS에서 위치를 맞춰뒀다(index.html 참고).
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, H - getDialogueBarHeight(), W, getDialogueBarHeight());
 
   // HUD (HTML 오버레이) 갱신 - 이 요소들은 애초에 canvas 밖의 절대 위치 DOM이라 카메라와 무관함
   updateHud();
