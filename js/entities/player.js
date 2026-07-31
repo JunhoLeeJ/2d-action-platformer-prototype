@@ -47,8 +47,28 @@ let playerLastMoveDir = 1;
 // 바꿔도(왔다갔다 스팸 등) 뚝뚝 끊기지 않고 자연스럽게 옆을 오간다 - 그 과정에서 잠깐 플레이어와
 // 겹칠 수 있는데, 그때는 draw()에서 유령을 플레이어보다 위에 그려서 가려지지 않게 한다.
 const ghostNpc = { x: 0, y: 0, facing: -1 };
+
+// side(-1|1) 방향으로 GHOST_NPC_FOLLOW_OFFSET만큼 떨어진 자리에 유령을 놓았을 때 solidPlatforms(존
+// 좌우 끝 벽 포함)와 겹치는지 확인한다 - drawGhostNpc()가 실제로 그리는 것과 같은 크기/정렬(가로
+// 절반 폭, 바닥 정렬)의 사각형으로 판정해야 화면에 보이는 것과 일치한다.
+function isGhostSideBlocked(side) {
+  const ghostW = player.w * 0.5, ghostH = player.h * 0.5;
+  const centerX = (player.x + player.w / 2) + side * CONFIG.GHOST_NPC_FOLLOW_OFFSET;
+  const rect = { x: centerX - ghostW / 2, y: player.y + (player.h - ghostH), w: ghostW, h: ghostH };
+  return currentZone.solidPlatforms.some((s) => rectsOverlap(rect, s));
+}
+
 function updateGhostNpc(dt) {
-  const targetCenterX = (player.x + player.w / 2) - playerLastMoveDir * CONFIG.GHOST_NPC_FOLLOW_OFFSET;
+  // 유령은 여전히 실제 충돌/전투 판정에는 전혀 관여하지 않는다(위 주석의 불변 조건 그대로 유지) -
+  // 다만 목표 위치를 고를 때만 "그 방향이 벽 등 solidPlatforms에 막혀 있는지" 순수 시각적으로
+  // 확인해서, 막혀 있으면 반대편으로 뒤집는다. 이게 없으면 플레이어가 벽에 딱 붙어서 반대쪽을 보고
+  // 있을 때(마지막 이동 방향이 벽 쪽) 유령의 목표 위치가 벽 안쪽으로 잡혀 벽을 뚫고 서 있는 것처럼
+  // 보이는 문제가 있었다(사용자 피드백) - 게임플레이에 영향을 주는 실제 충돌 응답이 아니라 "겹치지
+  // 않는 자리를 고르기만" 하는 보정이라 이 불변 조건과 모순되지 않는다.
+  let side = -playerLastMoveDir;
+  if (isGhostSideBlocked(side)) side = -side;
+
+  const targetCenterX = (player.x + player.w / 2) + side * CONFIG.GHOST_NPC_FOLLOW_OFFSET;
   const targetX = targetCenterX - player.w / 2;
   const targetY = player.y;
 

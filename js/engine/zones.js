@@ -295,12 +295,26 @@ function loadZone(zoneId, spawnAt) {
 // 크래시가 난다(진행 중인 fade의 updateSequence가 그 다음 줄에서 activeSequence를 계속 참조함).
 // 반대로 QA 패널 워프는 임의의 시점에 끼어드는 것이라 그 강제종료가 반드시 필요한데, 그건 호출자인
 // qapanel.js의 warpToZone()이 이 함수를 부르기 전에 직접 처리한다.
+// zone.checkpointRequiresTouch: true인 존은 문을 넘어오는 것만으로 체크포인트가 자동 활성화되면 안
+// 된다 - 사용자 요청("체크포인트는 닿기 전에는 빛나면 안 된다, 플레이어가 직접 닿아야만 파랗게
+// 빛나면서 리스폰 포인트가 된다"). 그런 존은 실제 리스폰 지점 갱신을 기둥 자신의 walkIn 트리거에
+// 맡기고(각 zone def 참고, 예: f2z2_checkpoint/f2z3_legacy_arena) 여기서는 손대지 않는다 - 이
+// 플래그가 없는 존(1층 전체, f2z1_gyeol_encounter처럼 기둥 도입 이전 존)만 기존과 동일하게 문을 넘을
+// 때마다 항상 자동 활성화된다.
 function enterZone(zoneId) {
   const def = ZONES[zoneId];
   loadZone(zoneId, def.entryPoint);
 
-  const firstCheckpoint = def.checkpoints[0];
-  activateCheckpoint(zoneId, def.entryPoint.x, def.entryPoint.y, firstCheckpoint && firstCheckpoint.id);
+  if (!def.checkpointRequiresTouch) {
+    const firstCheckpoint = def.checkpoints[0];
+    activateCheckpoint(zoneId, def.entryPoint.x, def.entryPoint.y, firstCheckpoint && firstCheckpoint.id);
+  } else if (!currentCheckpoint) {
+    // currentCheckpoint가 세션 내내 단 한 번도 설정된 적 없는 극단적인 경우(예: 부팅 직후 QA 패널로
+    // 이런 존에 곧장 워프)의 안전망 - activateCheckpoint()를 그대로 부르면 cp.active까지 켜져서
+    // "만지기 전엔 안 빛난다"는 규칙이 깨지므로, 여기서는 currentCheckpoint만 최소한으로 직접 채워
+    // 넣어 리스폰이 크래시 없이 되게만 한다(기둥은 여전히 안 빛남 - 실제로 만져야 진짜로 켜진다).
+    currentCheckpoint = { zoneId, x: def.entryPoint.x, y: def.entryPoint.y, checkpointId: null };
+  }
 
   resetPlayerVitals();
 }

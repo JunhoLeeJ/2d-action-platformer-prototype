@@ -33,6 +33,7 @@
     id: "f2z3_legacy_arena",
     name: "2층 구역 3 - 몬스터들 (레거시 아레나)",
     floor: 2, // 참고용 메타데이터일 뿐 - 실제 층 전환 로직은 없음 (zones.js 주석 참고)
+    checkpointRequiresTouch: true, // enterZone()이 이걸 보고 문 통과만으로는 자동 활성화하지 않음
 
     width: 3840 + SPAWN_SAFE_OFFSET, // 캔버스 너비(1440)의 약 2.7배 - 가로 스크롤 레벨
     height: 810, // 화면 높이(H)와 동일 = 세로 스크롤 없는 존. 바닥(groundY+groundH=790)이 20px 여유로 거의 맞닿음
@@ -99,17 +100,20 @@
       { type: "chaser", x: 2700 + SPAWN_SAFE_OFFSET, y: 706, opts: { patrolHalfRange: 80, stunnable: false } }, // 바닥 순찰 - 스턴 면역
     ],
 
-    // 문 앞 체크포인트 기둥(사용자 요청으로 추가, 이후 모든 존 기본 관례 - ROADMAP.md 참고) - 이 존은
-    // 기믹을 처음 보여주는 자리(f2z2_checkpoint)가 아니라서 트리거/컷신 없이 이미 켜진 상태로만 둔다.
-    // enterZone()이 문을 넘는 순간 이미 activateCheckpoint를 호출해줬으므로 이 기둥은 항상 켜져서
-    // 보인다(js/rendering.js의 drawCheckpointPillarProp이 currentZone.checkpoints의 active를 직접 봄).
+    // 문 앞 체크포인트 기둥(사용자 요청으로 추가, 이후 모든 존 기본 관례 - ROADMAP.md/CLAUDE.md 참고).
+    // 이 존은 기믹을 처음 보여주는 자리(f2z2_checkpoint)가 아니라서 손짓 컷신은 없지만, **문을 넘는
+    // 것만으로 자동으로 켜지면 안 된다는 사용자 피드백 이후로는 이 존도 실제로 기둥에 닿아야만
+    // 켜진다** - `checkpointRequiresTouch: true` + 아래 triggerZones 참고.
     ambientProps: [
       { type: "checkpointPillar", x: pillarX, y: pillarY, w: pillarW, h: pillarH, checkpointId: CHECKPOINT_ID },
     ],
 
     entryPoint: { x: 40, y: standingTopY }, // 문으로 들어오거나 체크포인트가 없을 때 서는 기본 위치
     checkpoints: [
-      { id: CHECKPOINT_ID, x: 40, y: standingTopY, active: true },
+      // active 기본값은 false - checkpointRequiresTouch:true라서 enterZone()이 이 값을 안 건드리고
+      // 지나가므로(f2z2_checkpoint와 동일한 이유), 실제로 만지기 전까지는 이 정적 초기값이 그대로
+      // 남아있는다.
+      { id: CHECKPOINT_ID, x: 40, y: standingTopY, active: false },
     ],
 
     // 왼쪽 문은 배경일 뿐(트리거 없음 - 뒤로 못 감), 오른쪽 문은 아직 다음 존이 없어서 null.
@@ -120,7 +124,22 @@
     },
 
     floors: [],
-    triggerZones: [],
+    // 컷신 없는 즉시 활성화 - f2z2_checkpoint의 손짓 컷신과 달리 카메라 홀드/애니메이션 없이 닿으면
+    // 바로 activateCheckpoint만 부른다(이 존은 기믹을 이미 소개받은 뒤라 다시 보여줄 필요 없음).
+    // yMin/yMax는 f2z2_checkpoint의 기둥 트리거와 동일한 이유로 동일한 관례를 따름(점프로 못
+    // 건너뛰도록 yMin은 넉넉하게, 다른 층 오작동 방지로 yMax는 타이트하게).
+    triggerZones: [
+      {
+        id: "checkpoint_pillar_touch",
+        kind: "walkIn",
+        xMin: pillarX - 20, xMax: pillarX + pillarW + 20,
+        yMin: pillarY - 350, yMax: standingTopY + 25,
+        repeatable: true,
+        sequence: [
+          { type: "callback", fn: () => { activateCheckpoint("f2z3_legacy_arena", 40, standingTopY, CHECKPOINT_ID); } },
+        ],
+      },
+    ],
     ruleFlags: {},
   };
 })();

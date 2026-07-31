@@ -526,6 +526,27 @@ mimeA처럼 `enemies[]`에(기존 AI 재사용 가능하면 재스킨), 순수 �
   이제 `ZONES`에 등록된 모든 존을 순회해서 정확히 하나만 켠다. `drawCheckpointPillarProp`
   (`js/rendering.js`)이 이 `cp.active`를 매 프레임 직접 읽어서 "지금 켜져 있는지"를 그리므로, 세션 내
   어떤 존을 가도 리스폰 지점은 항상 하나만 파랗게 빛난다.
+- (같은 세션, 사용자 피드백으로 즉시 수정됨) **체크포인트는 문을 넘는 것만으로 자동 활성화되면 안
+  되고, 실제로 기둥에 닿아야만 켜진다.** 위 항목에서 처음 만들 때는 "소개 존만 컷신+트리거, 나머지
+  존은 이미 켜진 ambientProp"이었는데, 사용자가 "닿기 전엔 절대 빛나면 안 된다"고 명확히 해서
+  설계를 바꿈: `zone.checkpointRequiresTouch: true`를 두면 `enterZone()`이 그 존의 자동
+  `activateCheckpoint()` 호출을 건너뛰고, 실제 활성화는 기둥 자신의 `walkIn` 트리거(모든 존에 이제
+  하나씩 있음 - 소개 존은 최초 1회만 컷신을 보여주고 그 뒤로는 조용히 활성화만, 나머지 존은 처음부터
+  조용히 활성화만)가 전담한다. 트리거는 `repeatable:true`(체크포인트는 몇 번을 다시 밟아도 매번
+  적용돼야 함) + yMin을 기둥보다 350px 위까지 넉넉하게(점프로 못 건너뜀) + yMax는 타이트하게(다른 층
+  오작동 방지) 잡는다. **실제로 겪은 버그 두 개**: ① 소개 존의 "1회만 컷신" 판정에 `hasSeenTrigger()`
+  를 썼다가 실패함 - `repeatable:true` 트리거는 애초에 `seenTriggerIds`에 기록되지 않아서(`fireTrigger`
+  참고) 항상 false만 나옴 - 존 파일 클로저 안의 평범한 `let introShown` 불리언으로 교체. ② 각 zone
+  def의 `checkpoints[].active`를 다른 존처럼 `true`로 박아뒀다가, `enterZone()`이 더 이상 이 값을
+  안 건드리는 존에서는 그 정적 초기값이 그대로 남아 "만지기도 전에 이미 켜져 보이는" 원래 문제가
+  똑같이 재현됨 - `false`로 고침. 둘 다 CLAUDE.md "Checkpoint pillars" 항목에 반영해 다음 존 만들 때
+  반복 안 하게 해둠.
+- (같은 세션) **유령 NPC(결)가 벽을 시각적으로 뚫고 서 있던 문제 수정.** 플레이어가 벽에 딱 붙어
+  반대쪽을 보고 있을 때, 유령의 목표 위치(마지막 이동 반대편) 계산이 벽 안쪽으로 잡혀 눈에 보이게
+  겹쳐 있었음(사용자 피드백) - `updateGhostNpc()`(`js/entities/player.js`)에 `isGhostSideBlocked(side)`
+  를 추가해서, 목표 방향이 `currentZone.solidPlatforms`(벽 포함)와 겹치면 반대편으로 뒤집는다. 유령은
+  여전히 실제 충돌/전투 판정에 전혀 관여하지 않는다는 CLAUDE.md 불변 조건은 그대로 유지 - "겹치지 않는
+  자리 고르기"일 뿐 실제 충돌 응답이 아니다.
 - (같은 세션) **몬스터 스폰과 체크포인트 사이 최소 안전 거리 - 새 존 만들 때마다 확인할 것.**
   `CONFIG.ENEMY_DEFAULT_DETECTION_RANGE_W`(480px, 중심-중심 거리 기준)보다 가까우면 리스폰 직후
   바로 재피격당할 수 있다 - `f2z3_legacy_arena`의 `SPAWN_SAFE_OFFSET` 상수(레벨 전체 콘텐츠를
