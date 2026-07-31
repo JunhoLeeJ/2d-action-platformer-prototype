@@ -102,12 +102,13 @@
           { type: "cameraHold", target: { x: capturedX + capturedW / 2 - W / 2, y: capturedY + capturedH / 2 - H / 2 }, duration: 0.8 },
           { type: "cameraHold", target: { x: capturedX + capturedW / 2 - W / 2, y: capturedY + capturedH / 2 - H / 2 }, duration: 0.5 },
           { type: "dialogue", speaker: "???", text: "와, 고마워! 이름이 뭐야?" },
+          // 화자 없는 "..." - 침묵하는 주인공의 반응(사용자 요청으로 추가, ROADMAP.md 원문에도 반영됨).
+          // "이름이 뭐야?"라는 물음에 대답 없이 침묵하는 것이므로 그 직후, 결의 반응(클로즈업)보다 앞에 옴.
+          { type: "dialogue", speaker: null, text: "..." },
           // "짧은 카메라 홀드, 결 표정 클로즈업" - 실제 확대는 없어 같은 지점을 조금 더 오래 고정하는
           // 것으로 대신함(원문 자체가 "지금 단계에선 확대 정도로만 처리 가능"이라고 명시).
           { type: "cameraHold", target: { x: capturedX + capturedW / 2 - W / 2, y: capturedY + capturedH / 2 - H / 2 }, duration: 1.0 },
           { type: "dialogue", speaker: "결", text: "...말 안 해도 상관없어! 나 결이야." },
-          // 화자 없는 "..." - 침묵하는 주인공의 반응(사용자 요청으로 추가, ROADMAP.md 원문에도 반영됨).
-          { type: "dialogue", speaker: null, text: "..." },
           { type: "animation", entityRef: ghostNpc, anim: "lookAtPlayer", duration: 0.4 }, // "주인공 쪽 잠깐 바라보는 모션" 훅 (렌더링 미구현)
           { type: "dialogue", speaker: "결", text: "...너도." },
         ],
