@@ -5,6 +5,16 @@
 // 체크포인트"를 가리키는 가변 상태다. main.js 부트스트랩에서 첫 존 진입 시점에 초기값이 세팅된다.
 let currentCheckpoint = null;
 
+// 체크포인트 하나가 "회복"을 이미 한 번 내준 적이 있는지 - zoneId:checkpointId로 키를 잡는다
+// (seenTriggerIds, js/engine/cutscene.js와 동일한 "한 번뿐" Set 패턴). 사용자 요청: "한번 체력을 채운
+// 체크포인트에서는 다시 체력을 채울 수 없음" - 안 그러면 체크포인트 바로 옆에서 몬스터를 살짝 맞고
+// 돌아와 회복하고 다시 나가 맞고 돌아오는 식으로 사실상 무한 회복이 가능해진다. 이 Set은 세션 내내
+// 유지되며 절대 지워지지 않는다 - 한 번 회복을 내준 체크포인트는 그 세션에서 다시는 회복을 안 준다.
+// 죽어서 리스폰할 때의 회복(resetPlayerVitals, player.js)은 이 제한과 완전히 무관하다 - respawnPlayer는
+// activateCheckpoint를 호출하지 않고 항상 무조건 풀피로 되돌리므로, 이 Set은 오직 "살아있는 채로
+// 체크포인트를 다시 밟았을 때"의 추가 회복만 막는다.
+const healedCheckpointIds = new Set();
+
 // 스토리 트리거(첫 체크포인트)든 근접 자동 감지(이후 체크포인트)든 결국 이 함수 하나를 호출하면 된다.
 // 존 정의에 붙은 checkpoint 오브젝트의 active 표시도 여기서 갱신 - respawnPlayer가
 // loadZone(currentCheckpoint.zoneId, currentCheckpoint)로 그대로 재사용한다.
@@ -24,6 +34,11 @@ function activateCheckpoint(zoneId, x, y, checkpointId) {
   // (player.js)와 달리 여기서는 HP/피격 타이머만 건드린다 - attackState/표류/속도까지 통째로 리셋하면
   // 전투 도중 체크포인트를 스쳐 지나가는 상황(예: 근접 체크포인트를 밟으며 몬스터와 싸우는 중)에
   // 스윙/표류가 뜬금없이 캔슬돼버리는 부작용이 생긴다 - 체력 회복은 그 문제가 없으므로 범위를 좁혀서만 적용.
-  player.hp = player.maxHp;
-  player.timeSinceHit = Infinity;
+  // 단, 이 체크포인트가 이미 한 번 회복을 내준 적이 있으면(healedCheckpointIds) 이번엔 건너뛴다(§ 위).
+  const healKey = zoneId + ":" + checkpointId;
+  if (!healedCheckpointIds.has(healKey)) {
+    healedCheckpointIds.add(healKey);
+    player.hp = player.maxHp;
+    player.timeSinceHit = Infinity;
+  }
 }
