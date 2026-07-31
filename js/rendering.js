@@ -152,6 +152,34 @@ function drawFragmentObjectProp(prop) {
   ctx.restore();
 }
 
+// driftAbsorb - crackMark 흡수 애니메이션(cutscene.js의 "driftAbsorb" 이벤트가 driftAbsorbAnim을
+// 매 프레임 갱신, 여기서는 그리기만 함). fragmentObject와 같은 다이아몬드 반짝이 모양을 재사용하되,
+// 시작 위치에서 플레이어 중심까지 서서히 빨려들어가듯 이동하며 작아지고 옅어진다 - "[V] 표류를
+// 받아들인다" 텍스트 프롬프트 대신 시각적으로 표류 해금을 표현해달라는 사용자 피드백으로 추가됨
+// (1층 구역 1 재진입 처리). 월드 좌표계라 draw()의 카메라 translate 블록 안에서 호출해야 한다.
+function drawDriftAbsorb() {
+  if (!driftAbsorbAnim) return;
+  const t = clamp(driftAbsorbAnim.elapsed / driftAbsorbAnim.duration, 0, 1);
+  const eased = t * t; // 처음엔 천천히, 끝에 가까워질수록 빠르게 빨려들어가는 느낌
+  const targetX = player.x + player.w / 2, targetY = player.y + player.h / 2;
+  const cx = driftAbsorbAnim.x + (targetX - driftAbsorbAnim.x) * eased;
+  const cy = driftAbsorbAnim.y + (targetY - driftAbsorbAnim.y) * eased;
+  const size = 20 * (1 - eased * 0.8); // 다가갈수록 작아짐(완전히 0으로 사라지진 않게 살짝 남김)
+  ctx.save();
+  ctx.globalAlpha = 1 - eased * 0.6; // 다가갈수록 옅어짐
+  ctx.shadowColor = "#7fd3ff";
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = "#bdeeff";
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - size / 2);
+  ctx.lineTo(cx + size / 2, cy);
+  ctx.lineTo(cx, cy + size / 2);
+  ctx.lineTo(cx - size / 2, cy);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 // 화면 지지직(글리치) - cutscene.js의 "screenGlitch" 이벤트가 screenGlitchIntensity(0~1)를 램프업하는
 // 동안 매 프레임 호출됨. 저장 상태 없이 매 프레임 Math.random()으로 새로 노이즈를 그려서 저절로
 // 깜빡이게 함(포탑 예고 pulse 등 기존 "상태 없는 도형 애니메이션" 패턴과 같은 정신 - 다만 이번엔 sin
@@ -231,6 +259,9 @@ function draw() {
     else if (prop.type === "fragmentObject") drawFragmentObjectProp(prop);
     else if (prop.type === "crackMark") drawCrackMarkProp(prop);
   }
+
+  // 표류 흡수 애니메이션(cutscene.js "driftAbsorb" 이벤트) - 월드 좌표계라 이 안(카메라 translate)에서 그림
+  drawDriftAbsorb();
 
   // 적 (포탑 + 체이서 공통 렌더링. 보라색 = 근접 공격으로도 스턴 안 걸리는 면역 개체 - 타입 공통 표시)
   for (const enemy of enemies) {

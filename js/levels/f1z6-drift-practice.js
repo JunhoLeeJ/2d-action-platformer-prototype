@@ -74,8 +74,23 @@
       left: { x: 40, y: groundY - doorH, w: 40, h: doorH },
     },
 
-    // 대사는 아직 안 넣음(사용자가 나중에 정확한 문구/타이밍을 직접 지정할 예정) - 구역 3/4와 동일 원칙
-    triggerZones: [],
+    // 대사는 아직 안 넣음(사용자가 나중에 정확한 문구/타이밍을 직접 지정할 예정) - 구역 3/4와 동일 원칙.
+    //
+    // drift_demo_placeholder - "표류 실사용 예시를 컷신으로 보여준다"는 계획의 자리표시자(사용자 요청,
+    // LATER.md에도 메모해둠). 지금은 카메라를 잠깐 오른쪽으로 훑는 것뿐인 텅 빈 자리 - 나중에 실제
+    // 표류 사용 예시(예: 동료가 투사체를 표류로 받아넘기는 모습)로 교체할 것. auto라 존 진입 즉시
+    // 1회만 재생되고(repeatable:false), 대사/애니메이션 등 실제 데모 콘텐츠가 없어 지금은 존재감이
+    // 거의 없지만, 트리거 자리 자체는 미리 잡아둬서 나중에 이 자리에 이벤트만 채워 넣으면 되게 했다.
+    triggerZones: [
+      {
+        id: "drift_demo_placeholder",
+        kind: "auto",
+        repeatable: false,
+        sequence: [
+          { type: "cameraHold", target: { x: 360, y: 0 }, duration: 1.2 }, // 360 = cameraBounds.maxX(width 1800 - W 1440)
+        ],
+      },
+    ],
     ruleFlags: {
       hideGhostNpc: true, hpFloor: 1,
       playerHpRegenDelay: CONFIG.HP_REGEN_DELAY, enemyHpRegenDelay: CONFIG.HP_REGEN_DELAY,

@@ -126,6 +126,25 @@ function endGlitch() {
   screenGlitchIntensity = 0;
 }
 
+// driftAbsorb - crackMark 같은 반짝이는 조각이 플레이어에게 빨려들어가듯 흡수되는 애니메이션. fade/
+// screenGlitch와 같은 "elapsed/total을 activeSequence에 얹어 매 프레임 갱신" 패턴 - 실제로 그리는 건
+// rendering.js의 drawDriftAbsorb()가 driftAbsorbAnim(아래)을 읽어서 담당한다. 입력을 기다리지 않고
+// duration이 지나면 자동으로 다음 이벤트로 진행 - 1층 구역 1 재진입 처리에서 "[V] 표류를 받아들인다"
+// 텍스트 프롬프트 대신 시각적 흡수 연출로 표류 해금을 표현해달라는 사용자 피드백으로 추가됨. 시작
+// 위치(x,y, 월드 좌표)만 이벤트가 지정하고 도착 지점은 매 프레임 그 시점의 플레이어 위치를 그대로
+// 따라간다(rendering.js 참고) - 컷신 도중 플레이어는 움직이지 않으므로 사실상 고정 지점이지만, 굳이
+// 존마다 플레이어 좌표를 따로 넘길 필요가 없어 이렇게 둠.
+let driftAbsorbAnim = null; // { x, y, elapsed, duration } - 반짝이 시작 위치
+function startDriftAbsorb(ev) {
+  driftAbsorbAnim = { x: ev.x, y: ev.y, elapsed: 0, duration: ev.duration };
+}
+function updateDriftAbsorb(dt) {
+  driftAbsorbAnim.elapsed += dt;
+}
+function endDriftAbsorb() {
+  driftAbsorbAnim = null;
+}
+
 function runEvent(ev) {
   switch (ev.type) {
     case "dialogue":
@@ -149,6 +168,9 @@ function runEvent(ev) {
       break;
     case "screenGlitch":
       startGlitch(ev);
+      break;
+    case "driftAbsorb":
+      startDriftAbsorb(ev);
       break;
     case "callback":
       if (ev.fn) ev.fn();
@@ -200,6 +222,15 @@ function updateSequence(dt) {
     return;
   }
 
+  if (ev.type === "driftAbsorb") {
+    updateDriftAbsorb(dt);
+    if (driftAbsorbAnim.elapsed >= driftAbsorbAnim.duration) {
+      endDriftAbsorb();
+      advanceSequence();
+    }
+    return;
+  }
+
   // cameraHold / animation - 단순 카운트다운, dt마다 무조건 줄어드니 절대 안 걸림(dangle 불가)
   activeSequence.eventTimer -= dt;
   if (activeSequence.eventTimer <= 0) advanceSequence();
@@ -229,6 +260,7 @@ function advanceSequence() {
 function endSequence() {
   cameraOverrideTarget = null;
   screenGlitchIntensity = 0; // 방어적 백스톱 - 글리치 도중 워프 등으로 시퀀스가 강제 종료돼도 화면에 남지 않게
+  driftAbsorbAnim = null; // 방어적 백스톱 - 흡수 애니메이션 도중 강제 종료돼도 반짝이가 화면에 안 남게
   hideTextbox();
   const onDone = activeSequence.onDone;
   const pending = pendingAutoTrigger;

@@ -47,6 +47,7 @@ function warpToZone(zoneId) {
   activeSequence = null;
   pendingAutoTrigger = null;
   cameraOverrideTarget = null;
+  driftAbsorbAnim = null; // endSequence()의 방어적 백스톱과 동일한 이유 - 흡수 애니메이션 도중 워프해도 안 남게
   hideTextbox();
   endFade();
 

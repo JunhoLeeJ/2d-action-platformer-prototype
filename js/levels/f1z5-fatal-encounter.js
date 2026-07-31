@@ -1,10 +1,11 @@
 "use strict";
 
-// 1층 구역 5 - 치명상 씬. 막다른 방(오른쪽 문 없음 - 다음 구역으로 못 감) 안쪽에 reachingEntity(손
-// 뻗은 형체)+fragmentObject(그 손이 향하는 조각, 정체는 스펙에 없는 플레이스홀더)가 있고, 접근하면
-// 조작권을 뺏긴 채 "느린 걸음"으로 끌려가다(zones.js의 makeSlowWalkTick, 이후 다른 컷신에도 재사용
-// 예정) 화면이 지지직대다(cutscene.js의 "screenGlitch" 이벤트) 즉사 -> 사망씬(암전, 지금은
-// 플레이스홀더) -> 구역 1로 텔레포트 + 페이드인.
+// 1층 구역 5 - 치명상 씬. 첫 방문에는 사실상 막다른 방이다 - 안쪽에 reachingEntity(손 뻗은
+// 형체)+fragmentObject(그 손이 향하는 조각, 정체는 스펙에 없는 플레이스홀더)가 있고, 접근하면 조작권을
+// 뺏긴 채 "느린 걸음"으로 끌려가다(zones.js의 makeSlowWalkTick, 이후 다른 컷신에도 재사용 예정) 화면이
+// 지지직대다(cutscene.js의 "screenGlitch" 이벤트) 즉사 -> 사망씬(암전, 지금은 플레이스홀더) -> 구역
+// 1로 텔레포트 + 페이드인. 재방문부터는 더 이상 막다른 방이 아니다 - 오른쪽 문(§ 아래)으로 구역 6까지
+// 정상적으로 걸어갈 수 있다.
 //
 // 1층 전체 규칙("구역 5 즉사 씬 제외 플레이어가 죽으면 안 됨" - CLAUDE.md/ROADMAP.md 참고)의 그
 // "제외"가 바로 이 구역 - 그래서 다른 1층 구역과 달리 ruleFlags.hpFloor를 일부러 안 넣는다(진짜 죽어야
@@ -17,8 +18,14 @@
 // 겪었는지 확인해서, ambientProps(reachingEntity/fragmentObject 제거 -> crackMark만 남김)와
 // triggerZones(새로운 crack_drift_unlock 트리거)를 둘 다 함수로 만들어 loadZone이 로드 시점마다 다시
 // 평가하게 한다(zones.js 참고 - trigger.sequence의 "발동 시점 평가"와 같은 정신, 이번엔 "로드 시점").
-// 이미 표류가 풀린 뒤에는(driftUnlocked) crack_drift_unlock도 더는 필요 없어 triggerZones가 빈 배열을
-// 낸다.
+// 이미 표류가 풀린 뒤에는(driftUnlocked) crackMark도 사라지고(흡수됐으니) crack_drift_unlock 트리거도
+// 더는 필요 없어 triggerZones가 빈 배열을 낸다.
+//
+// 오른쪽 문(doors.right, 아래) - 구역 6으로 연결. 첫 방문 땐 fatal_approach의 강제 "느린 걸음"이
+// 이 문보다 훨씬 앞(slowWalkTargetX=740)에서 플레이어를 붙잡아 죽이므로, 물리적으로 이 문까지 걸어갈
+// 수 없다 - 별도의 "죽기 전엔 문 잠금" 처리가 필요 없다. 재방문(crackMark) 이후엔 흡수 애니메이션이
+// 끝나고 조작권을 돌려주면 그대로 걸어서 이 문까지 갈 수 있다 - 즉 "1층 구역 6으로 가는 유일한 정상
+// 경로"가 이 문이다(그전까지는 구역 선택 패널로만 갈 수 있었음 - 사용자 피드백으로 추가).
 (function () {
   const groundY = 750, groundH = 40;
   const doorH = 140;
@@ -40,7 +47,10 @@
     name: "1층 구역 5 - 치명상 씬",
     floor: 1,
 
-    width: 1000,
+    // width가 1000->1200으로 늘어남(§ 위 오른쪽 문 주석) - crackMark(x:845)/crack_drift_unlock
+    // 트리거(x:805~915) 뒤로 문까지 걸어갈 여유 공간(x:1120)을 두기 위함. 막다른 방이었던 시절의
+    // 좁은 방 크기(1000)를 그대로 늘린 것일 뿐, 기존 트리거/ambientProps 좌표는 전혀 안 바뀜.
+    width: 1200,
     height: 810,
     groundY, groundH,
     groundGaps: [],
@@ -52,7 +62,7 @@
     floors: [],
     walls: [
       { x: 0, w: 40, gaps: [] },
-      { x: 960, w: 40, gaps: [] },
+      { x: 1160, w: 40, gaps: [] },
     ],
 
     enemySpawns: [], // 막다른 방 - 전투 없음
@@ -62,6 +72,8 @@
     // drawFragmentObjectProp, js/rendering.js 참고). 순수 배경 장식 - enemies[]/전투 판정과 무관.
     // 즉사 트리거를 이미 겪었으면(hasDied) 둘 다 사라지고 crackMark(drawCrackMarkProp)만 남는다 -
     // 함수 형태라 loadZone이 존을 다시 불러올 때마다 그 시점의 상태를 반영한다(§ 위 주석 참고).
+    // 표류까지 풀리고 나면(driftUnlocked) crackMark도 사라진다 - 흡수 애니메이션(아래 트리거 참고)으로
+    // 실제로 빨려들어가 없어졌다는 걸 방 상태에도 반영하는 것.
     ambientProps: () => {
       if (!hasDied()) {
         return [
@@ -69,6 +81,7 @@
           { type: "reachingEntity", x: 860, y: groundY - 70, w: 34, h: 70 },
         ];
       }
+      if (driftUnlocked) return [];
       return [{ type: "crackMark", x: crackMarkX, y: crackMarkY, w: crackMarkW, h: crackMarkH }];
     },
 
@@ -77,15 +90,22 @@
       { id: "start", x: 40, y: standingTopY, active: false },
     ],
 
-    // 오른쪽 문 없음 - 막다른 방이라 다음 구역으로 넘어가는 정상 경로 자체가 없다. 유일한 "출구"는
-    // 아래 트리거가 재생하는 즉사 시퀀스의 텔레포트뿐.
+    // 오른쪽 문 - 구역 6으로 연결(§ 파일 상단 주석). 다른 모든 문과 동일한 관례(yMax/landingY)를
+    // 그대로 따름 - 이 문 하나만 특별 취급할 이유가 없음(첫 방문에 못 가는 이유는 문 자체가 아니라
+    // 그 앞의 즉사 트리거가 걸어가지 못하게 막기 때문 - § 위 주석 참고).
     doors: {
       left: { x: 40, y: groundY - doorH, w: 40, h: doorH },
+      right: {
+        x: 1120, y: groundY - doorH, w: 40, h: doorH,
+        targetZoneId: "f1z6_drift_practice", yMax: standingTopY + 25, landingY: groundY,
+      },
     },
 
     // 함수 형태(§ 위 주석) - 아직 안 죽었으면 즉사 트리거만, 죽었지만 표류가 아직 안 풀렸으면
-    // crackMark 앞에서 V키로 표류를 해금하는 트리거만, 이미 풀렸으면 아무 트리거도 없다(빈 배열 -
-    // 막다른 방에 다시 들어와도 더 이상 아무 일도 안 일어남).
+    // crackMark 앞에서 흡수 애니메이션으로 표류를 해금하는 트리거만, 이미 풀렸으면 이 배열 자체는
+    // 비어있다(빈 배열 - crackMark 관련 이벤트는 더 이상 없다는 뜻). 오른쪽 문 트리거(doors.right)는
+    // 이 함수와 무관하게 loadZone()이 항상 별도로 붙여주므로(zones.js의 makeDoorTrigger), 이 배열이
+    // 비어있어도 문은 정상적으로 동작한다 - 매 분기에서 문 트리거를 직접 챙길 필요가 없음.
     triggerZones: () => {
       if (!hasDied()) {
         return [
@@ -129,19 +149,28 @@
               target: { x: crackMarkX + crackMarkW / 2 - W / 2, y: crackMarkY + crackMarkH / 2 - H / 2 },
               duration: 0.4,
             },
-            // dialogue 이벤트 대신 custom을 직접 써서 "V를 눌러야만" 다음으로 넘어가게 한다(dialogue는
-            // Mouse0/KeyW/Space로도 넘어가 버림 - cutscene.js 참고). 서사 대사가 아니라 조작 안내라
-            // "레벨에 대사를 임의로 지어 넣지 말 것"(ROADMAP.md) 규칙과 무관.
+            // "[V] 표류를 받아들인다" 텍스트 프롬프트는 사용자 피드백으로 뺌 - 대신 crackMark(반짝이는
+            // 조각)가 플레이어에게 빨려들어가듯 흡수되는 시각적 애니메이션으로 표류 해금을 표현한다
+            // (cutscene.js의 "driftAbsorb" 이벤트, js/rendering.js의 drawDriftAbsorb 참고). 입력 대기가
+            // 아니라 duration이 지나면 자동으로 다음 이벤트(driftUnlocked=true)로 넘어간다.
             {
-              type: "custom",
-              onStart: () => showTextbox(null, "[V] 표류를 받아들인다"),
-              tick: () => {
-                if (!justPressed["KeyV"]) return false;
-                hideTextbox();
-                return true;
+              type: "driftAbsorb",
+              x: crackMarkX + crackMarkW / 2,
+              y: crackMarkY + crackMarkH / 2,
+              duration: 1.1,
+            },
+            {
+              type: "callback",
+              fn: () => {
+                driftUnlocked = true;
+                // ambientProps() 함수는 다음 loadZone 때에나 다시 평가되므로(zones.js 참고 - "로드
+                // 시점" 평가), 이대로 두면 흡수 애니메이션이 끝난 후에도 crackMark가 그 자리에 그대로
+                // 남아있는 것처럼 보인다(글씨/반짝이가 플레이어에게 날아갔는데 원본이 안 사라짐) -
+                // currentZone.ambientProps는 loadZone이 만든 실제 배열이라 여기서 직접 지워서 "진짜로
+                // 흡수되어 사라졌다"를 그 자리에서 바로 반영한다.
+                currentZone.ambientProps = currentZone.ambientProps.filter((p) => p.type !== "crackMark");
               },
             },
-            { type: "callback", fn: () => { driftUnlocked = true; } },
           ],
         },
       ];
