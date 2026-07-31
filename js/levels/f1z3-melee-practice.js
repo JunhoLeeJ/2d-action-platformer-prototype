@@ -61,9 +61,17 @@
       },
     },
 
+    // makeCheckpointTrigger(js/engine/zones.js) - 예외 없이 실제로 닿아야만 체크포인트가 활성화된다
+    // (사용자 요청). 기둥 UI가 없으므로 entryPoint 자체를 판정 범위로 잡는다 - 스폰 즉시 범위 안이라
+    // "playing"의 첫 프레임에 바로 발동해서, 결과는 기존과 동일하게 "존에 들어오자마자 켜짐"이다.
     // 대사는 아직 안 넣음(사용자가 나중에 정확한 문구/타이밍을 직접 지정할 예정) - 컷신 엔진 자체는
     // 그대로 있으니 필요해지면 이 배열에 트리거를 추가하면 됨.
-    triggerZones: [],
+    triggerZones: [
+      makeCheckpointTrigger({
+        zoneId: "f1z3_melee_practice", checkpointId: "start", x: 40, y: standingTopY,
+        xMin: 20, xMax: 120, standingTopY,
+      }),
+    ],
     ruleFlags: {
       hideGhostNpc: true, hpFloor: 1,
       playerHpRegenDelay: CONFIG.HP_REGEN_DELAY, enemyHpRegenDelay: CONFIG.HP_REGEN_DELAY,

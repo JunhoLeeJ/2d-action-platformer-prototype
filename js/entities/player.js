@@ -166,8 +166,17 @@ function resetPlayerVitals() {
 
 // 죽음 → 리스폰: 위치/존 전환은 loadZone(체크포인트 존, 체크포인트 좌표)에 위임하고, 생존 상태는
 // resetPlayerVitals()가 담당한다.
+//
+// currentCheckpoint가 null인 극단적인 경우(체크포인트는 이제 실제로 밟아야만 활성화되므로 - 사용자
+// 요청, 예외 없음 - 부팅 직후 QA 패널로 곧장 워프한 뒤 그 존의 체크포인트를 밟기도 전에 죽는 등)의
+// 안전망 - activateCheckpoint()를 부르면 아직 안 만진 체크포인트가 켜져버리므로, 그냥 지금 존의
+// entryPoint로 조용히 되돌릴 뿐 아무 체크포인트도 활성화하지 않는다.
 function respawnPlayer() {
-  loadZone(currentCheckpoint.zoneId, currentCheckpoint);
+  if (!currentCheckpoint) {
+    loadZone(currentZone.id, currentZone.entryPoint);
+  } else {
+    loadZone(currentCheckpoint.zoneId, currentCheckpoint);
+  }
   resetPlayerVitals();
   gameState = "playing";
 }

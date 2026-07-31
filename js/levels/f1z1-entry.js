@@ -49,7 +49,10 @@
 
     entryPoint: { x: 40, y: standingTopY },
     checkpoints: [
-      { id: "start", x: 40, y: standingTopY, active: true },
+      // active 기본값은 false - enterZone()이 더 이상 이 값을 안 건드리므로, 트리거가 실제로 발동하기
+      // 전까지는 이 정적 초기값이 그대로 남아있는다(여기선 entryPoint에 스폰되는 즉시 발동하므로
+      // 체감상 차이는 없지만, "닿기 전엔 꺼져 있다" 원칙과 다른 존들의 관례에 맞춰 통일).
+      { id: "start", x: 40, y: standingTopY, active: false },
     ],
 
     doors: {
@@ -71,7 +74,16 @@
       },
     },
 
-    triggerZones: [],
+    // makeCheckpointTrigger(js/engine/zones.js) - 체크포인트는 이제 예외 없이 실제로 닿아야만
+    // 활성화된다(사용자 요청) - 1층엔 아직 기둥 UI가 없으므로 entryPoint 자체를 판정 범위로 잡는다.
+    // 플레이어가 그 자리에 스폰되는 순간 이미 범위 안이라 "playing"의 첫 프레임에 바로 발동해서,
+    // 결과는 기존과 동일하게 "존에 들어오자마자 켜짐"으로 보인다.
+    triggerZones: [
+      makeCheckpointTrigger({
+        zoneId: "f1z1_entry", checkpointId: "start", x: 40, y: standingTopY,
+        xMin: 20, xMax: 120, standingTopY,
+      }),
+    ],
     ruleFlags: { hideGhostNpc: true },
   };
 })();

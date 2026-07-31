@@ -88,6 +88,13 @@
     // 1회만 재생되고(repeatable:false), 대사/애니메이션 등 실제 데모 콘텐츠가 없어 지금은 존재감이
     // 거의 없지만, 트리거 자리 자체는 미리 잡아둬서 나중에 이 자리에 이벤트만 채워 넣으면 되게 했다.
     triggerZones: [
+      // makeCheckpointTrigger(js/engine/zones.js) - 예외 없이 실제로 닿아야만 체크포인트가 활성화된다
+      // (사용자 요청). 기둥 UI가 없으므로 entryPoint 자체를 판정 범위로 잡는다 - 스폰 즉시 범위 안이라
+      // "playing"의 첫 프레임에 바로 발동한다(kind:"auto"인 아래 플레이스홀더와는 별개의 walkIn).
+      makeCheckpointTrigger({
+        zoneId: "f1z6_drift_practice", checkpointId: "start", x: 40, y: standingTopY,
+        xMin: 20, xMax: 120, standingTopY,
+      }),
       {
         id: "drift_demo_placeholder",
         kind: "auto",

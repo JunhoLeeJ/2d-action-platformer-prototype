@@ -116,7 +116,15 @@
       },
     },
 
-    triggerZones: [],
+    // makeCheckpointTrigger(js/engine/zones.js) - 예외 없이 실제로 닿아야만 체크포인트가 활성화된다
+    // (사용자 요청). 기둥 UI가 없으므로 entryPoint 자체를 판정 범위로 잡는다 - 스폰 즉시 범위 안이라
+    // "playing"의 첫 프레임에 바로 발동해서, 결과는 기존과 동일하게 "존에 들어오자마자 켜짐"이다.
+    triggerZones: [
+      makeCheckpointTrigger({
+        zoneId: "f1z2_platforms", checkpointId: "start", x: 40, y: standingTopY,
+        xMin: 20, xMax: 120, standingTopY,
+      }),
+    ],
     ruleFlags: { hideGhostNpc: true },
   };
 })();

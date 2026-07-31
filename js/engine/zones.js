@@ -222,6 +222,51 @@ function makeDoorTrigger(door) {
   };
 }
 
+// 체크포인트 하나를 "실제로 닿아야만 활성화"되는 walkIn 트리거로 만든다 - 문에 makeDoorTrigger가
+// 있는 것과 대칭인 자리(사용자 요청: "모든 존, 모든 상황에서 예외 없이 체크포인트는 실제로 닿아야만
+// 활성화된다" - 그래서 이제 zone.checkpointRequiresTouch 같은 존별 예외 플래그는 아예 없다). 문을
+// 넘거나 워프하는 것만으로는 절대 활성화되지 않고, 이 트리거로만 활성화된다(zones.js의 enterZone
+// 참고). 기둥 같은 시각 오브젝트가 없는 존(1층 전체, f2z1_gyeol_encounter)은 xMin/xMax/topY를 그냥
+// entryPoint 기준으로 좁게 잡으면 된다 - 플레이어가 그 자리에 스폰되는 순간 이미 트리거 범위 안에
+// 있으므로 "playing" 상태의 첫 프레임에 자동으로 발동해서, 결과적으로 기존과 동일하게 "존에 들어오자
+// 마자 켜짐"으로 보인다.
+//
+// opts:
+//   zoneId, checkpointId - activateCheckpoint에 넘길 값
+//   x, y - 실제로 리스폰할 좌표(보통 그 체크포인트의 entryPoint와 동일)
+//   xMin, xMax - 트리거의 가로 판정 범위
+//   topY - 트리거의 세로 위쪽 기준(기둥이 있으면 기둥의 y, 없으면 standingTopY) - yMin은 여기서
+//          350px 위로 넉넉하게 잡아 점프로 못 건너뛰게 하고(사용자 요청: "점프 같은 걸로 체크포인트를
+//          안 찍고 넘어가는 일이 없도록"), yMax는 standingTopY+25로 타이트하게 잡아(문의 yMax 관례와
+//          동일) 다른 층에서 오작동하지 않게 한다.
+//   standingTopY - yMax 계산용
+//   introEvents(선택) - 함수, 이 체크포인트를 *처음* 밟을 때만 재생할 이벤트 배열(예: 손짓 컷신).
+//          두 번째부터는 activateCheckpoint 콜백만 조용히 실행된다. hasSeenTrigger()는 이 판정에
+//          못 쓴다 - repeatable:true 트리거는 seenTriggerIds에 아예 기록되지 않으므로(fireTrigger
+//          참고, 실제로 겪은 버그) 이 클로저 안의 introShown 플래그로 직접 기억한다.
+function makeCheckpointTrigger(opts) {
+  let introShown = false;
+  return {
+    id: "checkpoint_touch_" + opts.checkpointId,
+    kind: "walkIn",
+    xMin: opts.xMin, xMax: opts.xMax,
+    yMin: (opts.topY !== undefined ? opts.topY : opts.standingTopY) - 350,
+    yMax: opts.standingTopY + 25,
+    repeatable: true, // 체크포인트는 몇 번을 다시 밟아도(재방문 포함) 매번 다시 적용되어야 한다(사용자 요청)
+    sequence: () => {
+      const activateEvent = {
+        type: "callback",
+        fn: () => { activateCheckpoint(opts.zoneId, opts.x, opts.y, opts.checkpointId); },
+      };
+      if (opts.introEvents && !introShown) {
+        introShown = true;
+        return [...opts.introEvents(), activateEvent];
+      }
+      return [activateEvent];
+    },
+  };
+}
+
 // zoneId로 등록된 존을 불러와 currentZone/enemies/projectiles/플레이어 위치/카메라를 전부 그 존
 // 기준으로 다시 세팅한다. 체크포인트 리스폰과 문 전환 둘 다 이 함수 하나로 처리된다(§ 체크포인트 참고) -
 // 이 함수 자체는 위치만 옮길 뿐 HP/공격/표류 같은 "생존 상태"는 건드리지 않는다 - 그건 호출자의 몫이다
@@ -282,39 +327,25 @@ function loadZone(zoneId, spawnAt) {
 
 // "정식으로 새 존에서 시작"하는 두 경로(문 전환, QA 패널/메인 메뉴의 워프)가 완전히 똑같은 코드를
 // 타도록 만든 공용 진입점 - 사용자가 명시적으로 요청한 사항("문 넘는 거랑 구역 선택이랑 정확히 똑같은
-// 코드로 처리됐으면 좋겠다"). loadZone()으로 위치를 옮기고, 그 존의 entryPoint를 새 체크포인트로
-// 활성화하고(activateCheckpoint), resetPlayerVitals()(js/entities/player.js)로 HP를 포함한 생존
-// 상태를 전부 초기화한다 - 이 세 가지가 이제 문 전환/워프 어느 쪽에서 들어와도 동일하게 적용되므로,
-// "문으로 넘으면 체력이 안 차거나 리스폰 위치가 이상해진다"류의 두 경로 간 불일치가 구조적으로
-// 불가능해진다. 죽어서 리스폰하는 경우(respawnPlayer)는 일부러 이 함수를 안 쓴다 - 그쪽은 항상
-// entryPoint가 아니라 currentCheckpoint(반드시 entryPoint와 같으란 법 없음 - 존 중간의 체크포인트일
-// 수도 있음)로 돌아가야 하기 때문.
+// 코드로 처리됐으면 좋겠다"). loadZone()으로 위치만 옮기고, resetPlayerVitals()(js/entities/player.js)
+// 로 HP를 포함한 생존 상태를 전부 초기화한다.
+//
+// **체크포인트는 여기서 활성화하지 않는다 - 문을 넘거나 워프하는 것만으로는 절대 체크포인트가
+// 켜지지 않는다(사용자 요청: "모든 존, 모든 상황에서 예외 없이 실제로 닿아야만 활성화된다").** 실제
+// 활성화는 항상 각 존의 checkpoint touch 트리거(makeCheckpointTrigger()로 만듦, § 위 참고 - 문에
+// makeDoorTrigger가 있는 것과 대칭)가 전담한다. 기둥 같은 시각 오브젝트가 없는 존(1층 전체,
+// f2z1_gyeol_encounter)도 예외가 아니다 - 그 존들의 트리거는 그냥 entryPoint 자체를 판정 범위로 잡아서,
+// 플레이어가 거기 스폰되는 순간 이미 트리거 안에 들어와 있으므로 "playing" 상태의 첫 프레임에
+// scanTriggerZones()가 곧바로 발동시킨다 - 결과는 기존과 동일하게 "존에 들어오자마자 켜짐"이지만,
+// 이제는 도어 전환의 특수 처리가 아니라 진짜 트리거를 통해서다(구조적으로 예외가 없어짐).
 //
 // 컷신 강제종료(activeSequence 등)는 일부러 이 함수에 안 넣는다 - 문 전환은 이미 "페이드 시퀀스 안"에서
 // 안전하게 호출되므로 그 시퀀스 자신의 activeSequence를 여기서 건드리면 그 시퀀스 자체가 끊겨서
 // 크래시가 난다(진행 중인 fade의 updateSequence가 그 다음 줄에서 activeSequence를 계속 참조함).
 // 반대로 QA 패널 워프는 임의의 시점에 끼어드는 것이라 그 강제종료가 반드시 필요한데, 그건 호출자인
 // qapanel.js의 warpToZone()이 이 함수를 부르기 전에 직접 처리한다.
-// zone.checkpointRequiresTouch: true인 존은 문을 넘어오는 것만으로 체크포인트가 자동 활성화되면 안
-// 된다 - 사용자 요청("체크포인트는 닿기 전에는 빛나면 안 된다, 플레이어가 직접 닿아야만 파랗게
-// 빛나면서 리스폰 포인트가 된다"). 그런 존은 실제 리스폰 지점 갱신을 기둥 자신의 walkIn 트리거에
-// 맡기고(각 zone def 참고, 예: f2z2_checkpoint/f2z3_legacy_arena) 여기서는 손대지 않는다 - 이
-// 플래그가 없는 존(1층 전체, f2z1_gyeol_encounter처럼 기둥 도입 이전 존)만 기존과 동일하게 문을 넘을
-// 때마다 항상 자동 활성화된다.
 function enterZone(zoneId) {
   const def = ZONES[zoneId];
   loadZone(zoneId, def.entryPoint);
-
-  if (!def.checkpointRequiresTouch) {
-    const firstCheckpoint = def.checkpoints[0];
-    activateCheckpoint(zoneId, def.entryPoint.x, def.entryPoint.y, firstCheckpoint && firstCheckpoint.id);
-  } else if (!currentCheckpoint) {
-    // currentCheckpoint가 세션 내내 단 한 번도 설정된 적 없는 극단적인 경우(예: 부팅 직후 QA 패널로
-    // 이런 존에 곧장 워프)의 안전망 - activateCheckpoint()를 그대로 부르면 cp.active까지 켜져서
-    // "만지기 전엔 안 빛난다"는 규칙이 깨지므로, 여기서는 currentCheckpoint만 최소한으로 직접 채워
-    // 넣어 리스폰이 크래시 없이 되게만 한다(기둥은 여전히 안 빛남 - 실제로 만져야 진짜로 켜진다).
-    currentCheckpoint = { zoneId, x: def.entryPoint.x, y: def.entryPoint.y, checkpointId: null };
-  }
-
   resetPlayerVitals();
 }

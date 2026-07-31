@@ -62,7 +62,9 @@
 
     entryPoint: { x: 40, y: standingTopY },
     checkpoints: [
-      { id: "start", x: 40, y: standingTopY, active: true }, // 2층의 첫 체크포인트
+      // active 기본값은 false - enterZone()이 더 이상 이 값을 안 건드리므로, 트리거가 실제로 발동하기
+      // 전까지는 이 정적 초기값이 그대로 남아있는다.
+      { id: "start", x: 40, y: standingTopY, active: false }, // 2층의 첫 체크포인트
     ],
 
     // 오른쪽 문 - 2층 구역 2(체크포인트)로 연결. 다른 모든 문과 동일한 관례(yMax/landingY) 그대로.
@@ -74,6 +76,10 @@
       },
     },
 
+    // makeCheckpointTrigger(js/engine/zones.js) - 예외 없이 실제로 닿아야만 체크포인트가 활성화된다
+    // (사용자 요청). 기둥 UI가 없으므로 entryPoint 자체를 판정 범위로 잡는다 - 스폰 즉시 범위 안이라
+    // "playing"의 첫 프레임에 바로 발동한다(kind:"auto"인 아래 결 조우 트리거와는 별개의 walkIn).
+    //
     // auto 트리거 - 존 진입 즉시 발동. 대사 4줄(+ 아래 삽입된 대사 없는 "..." 한 줄)은 ROADMAP.md
     // "2층 구역 1 대사 원문"에 확정되어 있는 문구를 그대로 사용 - 재해석/임의 대사 추가 금지(ROADMAP.md
     // 원칙). 원문의 2번째 줄("짧은 카메라 홀드, 결 표정 클로즈업")은 대사가 아니라 카메라 지시라서
@@ -81,6 +87,10 @@
     // 미구현이라(§ 5 아트 제약) 렌더링 효과는 없지만 훅만 걸어둔다(animation 이벤트 - CLAUDE.md에 이미
     // 문서화된 "훅만 있고 실제 렌더링은 아직" 상태).
     triggerZones: [
+      makeCheckpointTrigger({
+        zoneId: "f2z1_gyeol_encounter", checkpointId: "start", x: 40, y: standingTopY,
+        xMin: 20, xMax: 120, standingTopY,
+      }),
       {
         id: ENCOUNTER_ID,
         kind: "auto",

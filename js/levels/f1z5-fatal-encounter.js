@@ -38,6 +38,16 @@
   const FATAL_APPROACH_ID = "fatal_approach";
   const hasDied = () => hasSeenTrigger("f1z5_fatal_encounter", FATAL_APPROACH_ID);
 
+  // makeCheckpointTrigger(js/engine/zones.js) - 예외 없이 실제로 닿아야만 체크포인트가 활성화된다
+  // (사용자 요청). 기둥 UI가 없으므로 entryPoint 자체를 판정 범위로 잡는다 - 스폰 즉시 범위 안이라
+  // "playing"의 첫 프레임에 바로 발동한다. 이 존은 즉사 트리거가 별도의 텔레포트(enterZone)로
+  // 죽음을 처리하므로 이 체크포인트가 실제로 쓰일 일은 거의 없지만, "모든 존에 예외 없이" 원칙에
+  // 맞춰 triggerZones()의 두 분기(§ 아래) 모두에 포함시킨다 - 한 번만 만들어서 재사용.
+  const checkpointTrigger = makeCheckpointTrigger({
+    zoneId: "f1z5_fatal_encounter", checkpointId: "start", x: 40, y: standingTopY,
+    xMin: 20, xMax: 120, standingTopY,
+  });
+
   // crackMark 위치 - reachingEntity가 있던 자리(x:860) 근처에 흔적만 남긴다. fragmentObject도 같이
   // 치워서("reachingEntity 제거 + crackMark만 남음" - ROADMAP.md 원문) 방 안에 남는 건 이 흔적 하나뿐.
   const crackMarkX = 845, crackMarkY = groundY - 34, crackMarkW = 30, crackMarkH = 34;
@@ -109,6 +119,7 @@
     triggerZones: () => {
       if (!hasDied()) {
         return [
+          checkpointTrigger,
           {
             id: FATAL_APPROACH_ID,
             kind: "walkIn",
@@ -134,8 +145,9 @@
           },
         ];
       }
-      if (driftUnlocked) return [];
+      if (driftUnlocked) return [checkpointTrigger];
       return [
+        checkpointTrigger,
         {
           id: "crack_drift_unlock",
           kind: "walkIn",
