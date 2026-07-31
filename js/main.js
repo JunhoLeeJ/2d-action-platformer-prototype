@@ -89,6 +89,7 @@ function update(dt) {
     updateEnemies(dt);
     updateProjectiles(dt);
     scanTriggerZones();
+    checkAllEnemiesDeadTrigger();
   }
 
   updateCamera(dt);

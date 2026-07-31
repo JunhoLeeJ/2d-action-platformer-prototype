@@ -312,6 +312,20 @@ function checkAutoTrigger(zoneId) {
   }
 }
 
+// "playing" 상태에서 매 프레임 호출 - kind:"allEnemiesDead" 트리거를 확인한다. walkIn(위치)/auto(로드
+// 즉시)와 달리 "이 존에 스폰된 몬스터가 전부 죽었는지"를 폴리해서 발동하는 세 번째 종류 - wallGates가
+// "게이트 앞쪽에 살아있는 적이 있는지"를 매 프레임 폴링하는 것과 같은 정신을, 이동을 막는 대신 스토리
+// 비트를 트는 데 쓴 것. 2층 구역 1(결 조우 - "몬스터 3마리에 둘러싸임" → 다 잡으면 대사)에서 처음
+// 필요해짐. 존 하나에 이 kind는 하나만 두는 걸 전제로 설계됨(여러 개면 전부 같은 조건이라 의미 없음).
+function checkAllEnemiesDeadTrigger() {
+  const trigger = currentZone.triggerZones.find((t) => t.kind === "allEnemiesDead");
+  if (!trigger) return;
+  const key = currentZone.id + ":" + trigger.id;
+  if (!trigger.repeatable && seenTriggerIds.has(key)) return;
+  if (enemies.length === 0 || !enemies.every((e) => !e.alive)) return;
+  fireTrigger(trigger, currentZone.id);
+}
+
 // repeatable 트리거가 "그 자리에 가만히 서있는 동안 매 프레임 다시 발동"하지 않도록 - 한 번 겹친
 // 트리거는 플레이어가 완전히 벗어났다가 다시 들어와야만 재발동한다("OnTriggerEnter"류의 표준 동작).
 // zoneId+triggerId로 키를 잡아서(seenTriggerIds와 동일한 패턴) 존이 달라지면 자연히 별개로 취급됨.

@@ -98,6 +98,17 @@ function drawMimeBProp(prop) {
   drawRect(prop, pulse > 0.5 ? brightColor : dimColor);
 }
 
+// gyeolCaptured - 2층 구역 1(결 조우)에서 몬스터에게 둘러싸인 동안의 결(gyeol) 표시. 실제 동료
+// ghostNpc와는 별개의 순수 배경 장식(enemies[]/전투 판정과 무관) - 몬스터를 다 잡으면(§
+// f2z1_gyeol_encounter의 allEnemiesDead 트리거 콜백) 사라지고 그 자리를 ghostNpc가 대신한다.
+// 표정/세부 동작은 시도하지 않는다는 원칙(§ 5 아트 제약)이라 정지 자세 + 결박을 암시하는 가로 띠
+// 하나만 얹은 단순한 사각형.
+function drawGyeolCapturedProp(prop) {
+  drawRect(prop, "#d98a4a");
+  ctx.fillStyle = "#7a4a24";
+  ctx.fillRect(prop.x, prop.y + prop.h * 0.55, prop.w, prop.h * 0.12); // 결박 암시용 가로 띠
+}
+
 // 1층 구역 5(치명상 씬) 전용 배경 장식 두 개 - 둘 다 mimeB처럼 순수 연출, enemies[]/전투 판정과 무관.
 //
 // reachingEntity - "손 뻗은 형체"(§ 5 아트 제약): 몸통 사각형 + 팔이 반복 없이 한 방향(왼쪽, 다가오는
@@ -258,6 +269,7 @@ function draw() {
     else if (prop.type === "reachingEntity") drawReachingEntityProp(prop);
     else if (prop.type === "fragmentObject") drawFragmentObjectProp(prop);
     else if (prop.type === "crackMark") drawCrackMarkProp(prop);
+    else if (prop.type === "gyeolCaptured") drawGyeolCapturedProp(prop);
   }
 
   // 표류 흡수 애니메이션(cutscene.js "driftAbsorb" 이벤트) - 월드 좌표계라 이 안(카메라 translate)에서 그림

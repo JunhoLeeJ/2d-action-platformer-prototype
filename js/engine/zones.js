@@ -25,8 +25,16 @@ const RULE_FLAG_DEFAULTS = {
   enemyHpRegenDelay: null,
   hideGhostNpc: false,      // 1층은 동료 없이 혼자라는 설정이라(원작 스펙 "npc는 1층에서는 존재하지 않음") 유령 동료도 숨김
 };
+// ruleFlags 값은 고정값이거나, 매번 읽을 때 평가할 함수일 수 있다(ambientProps/triggerZones가 "로드
+// 시점" 함수를 지원하는 것과 같은 정신 - 다만 ruleFlags는 getRuleFlag() 자체가 이미 매 프레임/매번
+// 새로 호출되므로 "읽는 시점"에 그냥 평가하면 됨, 로드 시점에 캐싱할 필요가 없음). 2층 구역 1(결 조우)
+// 에서 처음 필요해짐 - `hideGhostNpc`가 "몬스터를 다 잡기 전까지는 true, 잡고 나면 false"처럼 같은
+// 존 방문 안에서 상태가 바뀌어야 하는데, 트리거 발동 시점(`fireTrigger`가 즉시 `seenTriggerIds`에
+// 기록)에 `hasSeenTrigger()`로 물어보면 정확히 그 순간부터 값이 바뀌므로 별도의 수동 토글이 필요
+// 없다. 값을 함수로 안 주면(기존 모든 존처럼 고정값이면) 그대로 동작 - 하위 호환 100% 유지.
 function getRuleFlag(name) {
-  const v = currentZone.ruleFlags[name];
+  const raw = currentZone.ruleFlags[name];
+  const v = typeof raw === "function" ? raw() : raw;
   return v === undefined ? RULE_FLAG_DEFAULTS[name] : v;
 }
 

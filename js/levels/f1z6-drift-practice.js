@@ -15,11 +15,14 @@
 // 막는 즉사라(triggerDeath는 applyDamageToHp를 안 거침) 1층의 "안 죽는다" 규칙과 충돌한다(구역 3과
 // 동일한 이유, f1z3-melee-practice.js 참고).
 //
-// 오른쪽 문은 아직 없음(의도적) - ROADMAP.md에 "층 이동(1층→2층)"이 이 구역과는 별개의 체크리스트
-// 항목으로 남아있고, 그 항목이 요구하는 건 평범한 문이 아니라 전용 층 이동 컷신(암전 후 2층 구역 1로
-// 이어지는 대사 포함)이라 지금 이 문서에서 만들 몫이 아니다. QA 패널로는 다른 존과 동일하게 바로
-// 워프해서 확인 가능하니 도어 부재가 테스트 가능성을 해치지 않는다 - 층 이동 작업 때 이 zone def에
-// doors.right만 추가하면 됨(엔진 차원 추가 작업 불필요, CLAUDE.md 참고).
+// 오른쪽 문(doors.right, 아래) - 2층 구역 1(f2z1_gyeol_encounter, 결 조우)로 연결. "층 이동
+// (1층→2층)" 작업 완료 - 원본 스펙엔 "층 이동 전용 컷신"이라고 되어 있었지만, CLAUDE.md의 "구조 관련
+// 확정 사항"대로 층 이동도 다른 문과 다를 것 없는 평범한 doors.right일 뿐이다(엔진이 이미 범용으로
+// 처리 - 새 엔진 기능 불필요, ROADMAP.md § 7 예상대로). "컷신이 이어진다"는 부분은 문 자체가 아니라
+// 2층 구역 1이 담당한다 - 그 존에 도착해도 결(gyeol)은 바로 안 나타나고 몬스터 3마리부터 처치해야
+// 하므로, 대사 시퀀스는 kind:"auto"가 아니라 새로 추가된 kind:"allEnemiesDead" 트리거(모든 몬스터가
+// 죽으면 자동 발동, js/engine/cutscene.js)를 쓴다 - f2z1_gyeol_encounter.js 참고.
+
 (function () {
   const groundY = 750, groundH = 40;
   const doorH = 140;
@@ -69,9 +72,14 @@
       { id: "start", x: 40, y: standingTopY, active: false },
     ],
 
-    // 왼쪽 문만 존재(배경, 트리거 없음) - 오른쪽 문은 위 주석 참고(층 이동 작업 때 추가 예정)
+    // 왼쪽 문은 배경(트리거 없음), 오른쪽 문은 층 이동(§ 위 주석) - 다른 모든 문과 동일한 관례
+    // (yMax/landingY)를 그대로 따름.
     doors: {
       left: { x: 40, y: groundY - doorH, w: 40, h: doorH },
+      right: {
+        x: 1720, y: groundY - doorH, w: 40, h: doorH,
+        targetZoneId: "f2z1_gyeol_encounter", yMax: standingTopY + 25, landingY: groundY,
+      },
     },
 
     // 대사는 아직 안 넣음(사용자가 나중에 정확한 문구/타이밍을 직접 지정할 예정) - 구역 3/4와 동일 원칙.
