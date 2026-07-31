@@ -11,9 +11,9 @@
 
 ## 지금 당장 다음에 할 일 (한 줄 요약)
 
-**1층 구역 1 재진입 처리**부터. 구역 5(치명상 씬)는 이번 세션에서 완료됨 - 아래 "1층 —
-레벨 레이아웃" 표와 "다음 작업 순서 제안" 섹션 참고. `f1z4_background_monsters`의 오른쪽 문은 이제
-`f1z5_fatal_encounter`(진짜 목적지)로 정식 배선됨 - 더 이상 임시 배선 아님.
+**1층 구역 6(표류 연습)**부터. 구역 1 재진입 처리(문 균열/crackMark/V키 표류 해금)는 이번 세션에서
+완료됨 - 아래 "1층 — 레벨 레이아웃" 표와 "다음 작업 순서 제안" 섹션 참고. `f1z4_background_monsters`의
+오른쪽 문은 `f1z5_fatal_encounter`(진짜 목적지)로 정식 배선되어 있음.
 
 ---
 
@@ -42,9 +42,9 @@
 
 ### 1층 전체 예외 규칙 (스펙 원문 그대로)
 1. 표류는 구역 5 재방문까지 해금되지 않음 — ✅ `driftUnlocked=false`로 시작 (전역 플래그,
-   `js/engine/zones.js`). ⚠️ **구역 5 재방문 시 `true`로 바꾸는 트리거는 아직 없음** — 구역 5 자체는
-   이제 있지만(`f1z5_fatal_encounter`), "재방문 시 V키로 해금"은 다음 작업인 "1층 구역 1 재진입 처리"
-   항목에서 구현 예정(§ 2 구역별 상태 표 참고).
+   `js/engine/zones.js`), ✅ **구역 5 재방문 시 V키로 `true`로 바꾸는 트리거 완료** -
+   `f1z5_fatal_encounter`의 `crack_drift_unlock` 트리거(§ 2 구역별 상태 표의 "구역 1 재진입 처리"
+   항목 참고).
 2. NPC는 1층에 존재하지 않음 — ✅ `ruleFlags.hideGhostNpc=true`를 구역 1/2에 설정해 유령 동료를 숨김.
 3. 구역 5 즉사 씬 제외 플레이어가 죽으면 안 됨(체력 닳는 건 보여야 함, 최소 체력 유지 + 무피격
    시간 경과 후 회복) — ✅ **구역 3에서 실제로 구현됨**: `CONFIG.HP_REGEN_DELAY`(마지막 피격 후
@@ -68,7 +68,7 @@
 | 4. 배경 몬스터 | 적 A 2마리 + 적 B 1마리, 전투 대상 아님(지나가는 구간) | ✅ 완료, 사용자 피드백으로 재조정됨 (`f1z4_background_monsters`, `js/levels/f1z4-background-monsters.js`) — 적 A(mimeA, 임시 이름 **"떠돌이"**)는 실제 `enemies[]` 몬스터(체이서 재사용)로 남고 **봉쇄 벽(`wallGates`)이 이 둘을 다 잡아야 열리게 추가됨**(원안의 "전투 대상 아님"에서 방향 전환). 적 B(mimeB)는 반대로 "적"이라는 정의 자체를 없애고 `zone.ambientProps`(CLAUDE.md 참고)로 옮김 - 체력 UI 없음, 공격 판정 자체가 없어 구조적으로 죽을 수 없고, `enemies[]`에 없으므로 봉쇄 벽 조건과도 완전히 무관함(별도 예외 처리 불필요). 인트로 대사는 뺌(§ 아래). **오른쪽 문이 이제 실제로 연결됨** - 처음엔 진짜 목적지(구역 5)가 아직 없어서 임시로 `f2z3_legacy_arena`(2층 구역 3)를 가리켰으나(사용자 확인), 구역 5가 완성되면서 `f1z5_fatal_encounter`로 정식 재배선됨. ⚠️ **버그 수정**: 처음 만들 때 구역 3의 `ruleFlags`를 그대로 복사하면서 `hpRegenDelay`까지 같이 들어가 있었음 - 그 결과 이 구역에서도 무피격 시간 경과 후 즉시 풀피 회복되는 기믹이 나왔는데, 이건 구역 3 전용 연습 장치라는 게 사용자 확인 사항이라 구역 4의 `ruleFlags`에서 `hpRegenDelay`를 뺌(`hpFloor`는 유지 - 1층 전체 "안 죽음" 규칙은 별개). **새 존을 만들 때 다른 존의 `ruleFlags`를 복사해서 시작하더라도, `hpRegenDelay`만큼은 그 존에 정말 필요한지 매번 따로 판단할 것** - 기본값이 아니라 구역 3만의 특수 케이스임. |
 | 5. 치명상 씬 | 막다른 방, `reachingEntity`+`fragmentObject`, 접근 시 느린 걸음→화면 지지직→즉사→사망씬→구역1로 텔레포트+페이드인 | ✅ 완료 (`f1z5_fatal_encounter`, `js/levels/f1z5-fatal-encounter.js`) — 오른쪽 문 없는 막다른 방. `reachingEntity`(팔을 왼쪽으로 뻗은 채 고정된 정지 자세)+`fragmentObject`(그 손끝이 닿는 자리에 배치, 정체는 스펙에 없어 옅은 pulse만 있는 플레이스홀더)는 둘 다 mimeB와 같은 `zone.ambientProps`(전투 판정 없는 순수 배경). 접근 트리거(`walkIn`, `repeatable:false`)가 발동하면: ① "느린 걸음"(`makeSlowWalkTick`, `js/engine/zones.js` - 조작권을 뺏은 채 targetX까지 느리게 강제 이동, 보스전 등에도 재사용할 범용 헬퍼로 설계) ② 화면 지지직(새 컷신 이벤트 타입 `"screenGlitch"`, `js/engine/cutscene.js` - `screenGlitchIntensity`를 0→1 램프업하고 `rendering.js`의 `drawScreenGlitch`가 매 프레임 저장 상태 없이 랜덤 노이즈를 그림) ③ 즉사(`callback`으로 `player.hp=0` 직접 대입 - `triggerDeath`/`respawnPlayer`는 안 씀, 컷신의 `gameState==="cutscene"`과 그 리스폰 흐름이 서로 다른 상태를 기대해서 충돌하기 때문) ④ 사망씬 플레이스홀더(핏빛 `#2b0000` 페이드, 문 전환과 구분되게 검정 대신 이 색을 씀) ⑤ `onMidpoint`에서 `enterZone("f1z1_entry")`로 텔레포트(문 전환/QA 워프와 완전히 같은 코드 경로 - 위치+체크포인트+HP 전부 정상 리셋됨) + 페이드인. `f1z4_background_monsters`의 오른쪽 문도 이 존으로 정식 배선됨(더 이상 임시 아님). |
 | 6. 표류 연습 | 구역 3과 비슷하지만 배치 다르게, 접근성 더 어렵게 | ❌ 미착수 |
-| 구역 1 재진입 처리 | 문에 "새 균열" 스프라이트 오버레이, 구역 5 재도달 시 `reachingEntity` 제거+`crackMark`만 남음, V키로 표류 해금(짧은 컷신) | ❌ 미착수 |
+| 구역 1 재진입 처리 | 문에 "새 균열" 스프라이트 오버레이, 구역 5 재도달 시 `reachingEntity` 제거+`crackMark`만 남음, V키로 표류 해금(짧은 컷신) | ✅ 완료 - `f1z1_entry`의 오른쪽 문에 `door.crackWhen()`(rendering.js가 매 프레임 확인하는 조건 함수) 추가, `f1z5_fatal_encounter`의 `ambientProps`/`triggerZones`를 함수로 바꿔(§ 6 참고) `hasSeenTrigger("f1z5_fatal_encounter","fatal_approach")` 여부에 따라 reachingEntity+fragmentObject ↔ crackMark 하나만 남기는 걸 갈아끼움. crackMark 근처에 새 트리거 `crack_drift_unlock`을 추가해 dialogue 대신 custom 이벤트로 "V키를 눌러야만" 진행되는 짧은 프롬프트("[V] 표류를 받아들인다" - 서사 대사가 아니라 조작 안내라 "대사 임의로 안 짓기" 규칙과 무관)를 보여주고 확정 시 `driftUnlocked=true`. Playwright로 전체 흐름(첫 방문 즉사→균열 생성→재방문 crackMark→V 해금→실제 표류 작동→3차 방문 시 트리거 소진) 실제 브라우저에서 검증 완료. |
 | 층 이동 (1층→2층) | 구역 6 끝 문 = 층 이동 트리거존, 암전 후 2층 구역 1로(컷신 계속 이어짐) | ❌ 미착수 |
 
 ### 구조 관련 확정 사항 (재확인용)
@@ -437,6 +437,29 @@ mimeA처럼 `enemies[]`에(기존 AI 재사용 가능하면 재스킨), 순수 �
   라 QA 패널 위에도 뜰 수 있고, `pausemenu.js`의 중앙 keydown 라우터에서 가장 먼저 검사됨(다른 어떤
   오버레이보다도 위에 뜰 수 있으므로). 기본 포커스는 "예"(위험 회피용 "아니오" 기본이 아님) - 이미
   명시적으로 고른 행동에 대한 재확인일 뿐이라 판단.
+- (1층 구역 1 재진입 처리 세션에서 추가) **`zone.triggerZones`/`zone.ambientProps`를 함수로 줄 수
+  있음 - `loadZone()`이 로드 시점에 평가.** `trigger.sequence`가 "발동 시점"에 평가되는 것과 같은
+  정신을 "로드 시점"으로 확장한 것 - 구역이 `seenTriggerIds`/`driftUnlocked` 같은 세션 상태에 따라
+  서로 다른 배경 장식/트리거 목록을 내놓아야 할 때(예: `f1z5_fatal_encounter`가 죽음을 겪었는지에
+  따라 reachingEntity+fragmentObject ↔ crackMark, 즉사 트리거 ↔ 표류 해금 트리거를 완전히 갈아끼움)
+  정적 배열로는 표현이 안 되어서 추가됨. 함수를 안 주면(기존 모든 존처럼 정적 배열이면) 그대로 동작 -
+  하위 호환 100% 유지. 새 존에서 "이 존은 재방문 시 다르게 보여야 한다"는 요구가 생기면 이 패턴을
+  먼저 검토할 것 - `hasSeenTrigger(zoneId, triggerId)`(`js/engine/cutscene.js`, `seenTriggerIds` 조회
+  헬퍼)와 짝을 이뤄 쓰는 게 기본형.
+- (같은 세션) **문에 `door.crackWhen()` — 매 프레임(그릴 때) 평가되는 조건부 시각 효과.** 위
+  triggerZones/ambientProps와 달리 문 객체 자체는 `currentZone.doors`에 고정 데이터로 남아있어
+  "로드 시점 재평가"가 안 통한다(재평가하려면 존을 다시 불러와야 하는데 재진입 없이도 균열이 보여야
+  함) - 그래서 `drawDoor()`(`js/rendering.js`)가 문을 그릴 때마다 `door.crackWhen && door.crackWhen()`을
+  직접 확인하는 방식으로 뒀다. 문의 트리거 판정(`xMin/xMax/yMax/landingY`)에는 전혀 관여하지 않는
+  순수 시각 오버레이 - 새로운 "이 존 특정 문에 세션 상태에 따른 표시가 필요하다"는 요구에 재사용할 것.
+- (같은 세션) **dialogue 이벤트 대신 custom으로 "특정 키를 눌러야만 진행"되는 프롬프트 만들기.**
+  dialogue 이벤트는 Mouse0/KeyW/Space 중 아무거나로 넘어가 버리게 하드코딩되어 있어서(`cutscene.js`의
+  `updateSequence`), "V키를 눌러야만" 같은 특정 키 하나로만 진행돼야 하는 경우엔 안 맞는다 -
+  `showTextbox`/`hideTextbox`(둘 다 `cutscene.js`의 최상위 함수라 어디서든 재사용 가능)를 `custom`
+  이벤트의 `onStart`/`tick`에서 직접 호출해 텍스트박스를 띄우고, `tick`이 원하는 키(`justPressed["KeyV"]`
+  등)만 확인하도록 만들면 된다(`f1z5_fatal_encounter`의 `crack_drift_unlock`이 실제 예시). 이건
+  서사 대사가 아니라 조작 안내 문구라 "레벨에 대사를 임의로 지어 넣지 말 것" 규칙과는 무관 - 실제
+  스토리 대사는 여전히 사용자가 지정하기 전까지 넣지 않는다.
 - (같은 세션) **최초 부팅 시에만 재현되던 낙사 버그 — 진짜 원인 특정 + 수정 완료.** 자세한 내용은
   § 2 위쪽 "게임을 처음 켰을 때만 낙사한다" 항목의 후속 수정 기록 참고 - 요약: (1) `input.js`의
   `handlePress`가 메뉴 오버레이가 열려있어도 무조건 `justPressed`/`heldKeys`를 기록해서, 메인 메뉴에서
@@ -461,13 +484,12 @@ mimeA처럼 `enemies[]`에(기존 AI 재사용 가능하면 재스킨), 순수 �
 3. ~~**1층 구역 5** (치명상 씬)~~ ✅ 완료 — `reachingEntity`/`fragmentObject`(`ambientProps`), 느린 걸음
    (`makeSlowWalkTick`, 범용 재사용 가능), 즉사 트리거, 사망씬 플레이스홀더(핏빛 페이드), 화면 지지직
    효과(`screenGlitch` 컷신 이벤트) 전부 구현됨. 자세한 내용은 § 2 구역별 상태 표 + § 5 + § 6 참고.
-4. **1층 구역 1 재진입 처리** — 다음 차례. 문에 "새 균열" 스프라이트 오버레이, 구역 5 재도달 시
-   `reachingEntity` 제거+`crackMark`만 남음, V키로 표류 해금(짧은 컷신). 구역 5의 즉사 트리거는
-   `repeatable:false`라 두 번째 방문부턴 이미 자동으로 재발동하지 않음(`seenTriggerIds`가 세션 내내
-   유지되므로) — 이 작업은 그 위에 "두 번째 방문 시의 다른 연출"(엔티티 제거/크랙 표시/V키 트리거)만
-   얹으면 됨, 즉사 트리거 자체를 다시 손볼 필요는 없음.
-5. **1층 구역 6** (표류 연습) — 구역 3 재활용 + 배치 변경. hpFloor+회복 인프라는 구역 3에서 이미
-   범용으로 만들어졌으므로 `ruleFlags.hpFloor`만 채우면 그대로 재사용 가능.
+4. ~~**1층 구역 1 재진입 처리**~~ ✅ 완료 — 문 균열 오버레이, 구역 5 재방문 시 crackMark 전환,
+   V키 표류 해금 전부 구현됨. 자세한 내용은 § 2 구역별 상태 표 + § 6 참고.
+5. **1층 구역 6** (표류 연습) — 다음 차례. 구역 3 재활용 + 배치 변경. hpFloor+회복 인프라는 구역
+   3에서 이미 범용으로 만들어졌으므로 `ruleFlags.hpFloor`만 채우면 그대로 재사용 가능. 이제
+   `driftUnlocked`이 구역 5 재방문 후 실제로 `true`가 될 수 있으므로, 이 구역은 표류가 실제로 풀린
+   상태에서 플레이된다는 전제로 설계할 것(이전까지는 표류가 전역적으로 항상 잠겨 있었음).
 6. **1층→2층 전환 컷신 + 2층 구역 1** (결 조우, 결의 AI 동료 전환).
 7. **2층 구역 2** (체크포인트 콘텐츠 — 엔진은 이미 있음).
 8. **2층 구역 3** (기존 `f2z3_legacy_arena` 배선만 하면 됨 — 콘텐츠 작업 거의 없음, 순서상 당겨도 무방).

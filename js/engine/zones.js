@@ -222,8 +222,16 @@ function makeDoorTrigger(door) {
 function loadZone(zoneId, spawnAt) {
   const def = ZONES[zoneId];
 
-  const triggerZones = def.triggerZones.slice();
+  // triggerZones/ambientProps는 정적 배열이거나, 로드 시점에 평가할 함수일 수 있다 - trigger.sequence가
+  // "발동 시점"에 평가되는 것과 같은 이유로, 이번엔 "로드 시점"에 평가된다(1층 구역 1 재진입 처리 작업에서
+  // 추가 - f1z5_fatal_encounter가 seenTriggerIds/driftUnlocked 같은 세션 상태에 따라 매번 다른
+  // reachingEntity/crackMark, 다른 트리거 목록을 내놓아야 해서 정적 배열로는 표현이 안 됨). 정적 배열을
+  // 주면 지금까지와 동일하게 그대로 쓰인다.
+  const defTriggerZones = typeof def.triggerZones === "function" ? def.triggerZones() : def.triggerZones;
+  const triggerZones = defTriggerZones.slice();
   if (def.doors.right) triggerZones.push(makeDoorTrigger(def.doors.right));
+
+  const ambientProps = typeof def.ambientProps === "function" ? def.ambientProps() : def.ambientProps;
 
   // floors(추가 바닥)/walls(추가 벽)는 각각 gaps만큼 구멍이 뚫린 채로 solidPlatforms에 합쳐진다 -
   // "제일 밑바닥 바닥" 하나뿐이던 것을 임의의 높이에 몇 개든 더 놓을 수 있게 일반화한 것 (§ 위 helper).
@@ -238,6 +246,7 @@ function loadZone(zoneId, spawnAt) {
 
   currentZone = {
     ...def,
+    ambientProps,
     solidPlatforms: [...buildGroundSegments(def), ...floorSegments, ...wallSegments, ...def.solidPlatforms],
     cameraBounds: { minX: 0, maxX: def.width - W, minY: 0, maxY: def.height - H },
     triggerZones,

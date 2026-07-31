@@ -63,6 +63,11 @@
       right: {
         x: 1520, y: groundY - doorH, w: 40, h: doorH,
         targetZoneId: "f1z2_platforms", yMax: standingTopY + 25, landingY: groundY,
+        // crackWhen(선택, rendering.js의 drawDoor가 매 프레임 확인) - 1층 구역 5의 즉사 트리거를 이미
+        // 겪은 뒤(구역 5 재도달 시 표류 해금 씬으로 이어지는 흐름의 첫 신호)엔 이 문에 "새 균열"이
+        // 남는다는 원본 스펙(ROADMAP.md "1층 구역 1 재진입 처리") - 순수 시각 효과라 문의 트리거
+        // 판정(yMax/landingY 등)에는 전혀 영향 없음.
+        crackWhen: () => hasSeenTrigger("f1z5_fatal_encounter", "fatal_approach"),
       },
     },
 

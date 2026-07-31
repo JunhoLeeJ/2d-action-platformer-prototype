@@ -61,6 +61,30 @@ function drawDoor(door) {
   ctx.strokeStyle = "#8d6e63";
   ctx.lineWidth = 3;
   ctx.strokeRect(door.x + 3, door.y + 3, door.w - 6, door.h - 6);
+  // door.crackWhen(선택) - 로드 시점이 아니라 매 프레임 그릴 때 평가되는 조건 함수(1층 구역 1 재진입
+  // 처리 작업에서 추가). 문 자체는 zone def에 고정 데이터로 있지만 "균열이 보이는지"는 세션 진행 상태
+  // (구역 5 즉사 트리거를 이미 겪었는지)에 달려있어서, ambientProps/triggerZones처럼 로드 시점 함수로도
+  // 안 되고(문은 currentZone.doors에 그대로 남아있는 정적 객체라 재평가 시점이 없음) 그릴 때마다 직접
+  // 확인해야 한다.
+  if (door.crackWhen && door.crackWhen()) drawDoorCrack(door);
+}
+
+// 문에 남은 "새 균열" - 1층 구역 5의 즉사 트리거를 겪고 구역 1로 돌아왔을 때 나타나는 흔적(정체는
+// crackMark와 같은 플레이스홀더). 도형(꺾인 선) 몇 개만으로 표현 - 별도 이미지 에셋 없음(§ 5 아트 제약).
+function drawDoorCrack(door) {
+  const cx = door.x + door.w / 2, topY = door.y + 6, botY = door.y + door.h - 6;
+  ctx.save();
+  ctx.strokeStyle = "#bdeeff";
+  ctx.lineWidth = 2;
+  ctx.shadowColor = "#7fd3ff";
+  ctx.shadowBlur = 4;
+  ctx.beginPath();
+  ctx.moveTo(cx, topY);
+  ctx.lineTo(cx - 5, topY + (botY - topY) * 0.35);
+  ctx.lineTo(cx + 4, topY + (botY - topY) * 0.6);
+  ctx.lineTo(cx - 3, botY);
+  ctx.stroke();
+  ctx.restore();
 }
 
 // 배경 장식 - 순수 연출, enemies[]에 없고 어떤 판정에도 관여 안 함(js/entities/enemies.js 상단 주석
@@ -89,6 +113,28 @@ function drawReachingEntityProp(prop) {
 // fragmentObject - reachingEntity가 뻗은 손이 향하는 조각(정체는 아직 스펙에 없음, 플레이스홀더).
 // 시각적 동작은 규정돼 있지 않아 mimeB와 같은 pulse 패턴만 아주 옅게 얹어 "주목할 물건"이라는 것만
 // 표시한다 - prop.x를 위상에 섞어 향후 여러 개가 있어도 서로 안 겹치게(§ 6 ROADMAP 패턴 재사용).
+// crackMark - 1층 구역 5(치명상 씬)를 재방문했을 때 reachingEntity/fragmentObject 대신 남는 흔적
+// (§ ROADMAP.md "1층 구역 1 재진입 처리"). drawDoorCrack과 같은 "꺾인 선" 모양을 재사용하되 땅에 남은
+// 자국이라는 느낌을 주려고 여러 갈래로 더 넓게 그린다 - 애니메이션 없는 정지 자국(reachingEntity와
+// 같은 이유로 저장 상태 불필요).
+function drawCrackMarkProp(prop) {
+  const cx = prop.x + prop.w / 2, topY = prop.y, botY = prop.y + prop.h;
+  ctx.save();
+  ctx.strokeStyle = "#7fd3ff";
+  ctx.lineWidth = 2;
+  ctx.shadowColor = "#7fd3ff";
+  ctx.shadowBlur = 5;
+  ctx.beginPath();
+  ctx.moveTo(cx, topY);
+  ctx.lineTo(cx - prop.w * 0.3, topY + prop.h * 0.4);
+  ctx.lineTo(cx + prop.w * 0.25, topY + prop.h * 0.65);
+  ctx.lineTo(cx, botY);
+  ctx.moveTo(cx - prop.w * 0.3, topY + prop.h * 0.4);
+  ctx.lineTo(cx - prop.w * 0.5, topY + prop.h * 0.8);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawFragmentObjectProp(prop) {
   const cx = prop.x + prop.w / 2, cy = prop.y + prop.h / 2;
   const pulse = (Math.sin(performance.now() / 500 + prop.x) + 1) / 2;
@@ -183,6 +229,7 @@ function draw() {
     if (prop.type === "mimeB") drawMimeBProp(prop);
     else if (prop.type === "reachingEntity") drawReachingEntityProp(prop);
     else if (prop.type === "fragmentObject") drawFragmentObjectProp(prop);
+    else if (prop.type === "crackMark") drawCrackMarkProp(prop);
   }
 
   // 적 (포탑 + 체이서 공통 렌더링. 보라색 = 근접 공격으로도 스턴 안 걸리는 면역 개체 - 타입 공통 표시)

@@ -57,6 +57,13 @@ let screenGlitchIntensity = 0;
 // 리스폰으로 같은 존을 다시 불러와도(loadZone은 이 Set을 건드리지 않음) 스토리 비트가 중복 재생되지 않는다.
 const seenTriggerIds = new Set();
 
+// zone def의 triggerZones/ambientProps가 함수 형태(§ zones.js의 loadZone)로 "이 스토리 비트를 이미
+// 봤는지"에 따라 다른 콘텐츠를 내놓을 때 쓰는 조회 헬퍼 - seenTriggerIds가 이 파일에만 있어서 다른
+// 파일(레벨 정의 등)이 직접 Set을 만지지 않고 이 함수로만 확인하게 한다.
+function hasSeenTrigger(zoneId, triggerId) {
+  return seenTriggerIds.has(zoneId + ":" + triggerId);
+}
+
 const fadeOverlayEl = document.getElementById("fadeOverlay");
 const cutsceneBoxEl = document.getElementById("cutsceneBox");
 const cutsceneSpeakerEl = document.getElementById("cutsceneSpeaker");
