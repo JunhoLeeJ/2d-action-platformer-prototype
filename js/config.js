@@ -173,6 +173,19 @@ const CONFIG = {
   // 어두워지는 pulse만 있음("웅얼거림", § 5 아트 제약: 시각적 동작 없음).
   MIME_B_PULSE_SPEED: 900,            // 클수록 느리게 pulse (performance.now()를 나누는 분모로 씀 - 텔레그래프 pulse와 같은 패턴)
 
+  // --- 보스 (keeperBoss, "지키는 자" - 2층 구역 4) ---
+  // 포탑처럼 제자리에서 예고 후 발사하지만(js/entities/enemies.js의 updateKeeperBossAI) 감지/어그로
+  // 판정이 아예 없다 - 보스방은 카메라 고정 한 화면짜리(zone.width/height === W/H)라 입장하는 순간
+  // 이미 대치 상태인 게 자연스러워서 항상 aggro:true로 시작한다(ROADMAP.md "몬스터 스폰 안전 거리"
+  // 규칙의 명시적 예외). 체력 비율로 1/2/3페이즈가 나뉘고(원본 스펙: "색+공속 변화"), 페이즈가 오를수록
+  // BOSS_KEEPER_FIRE_INTERVAL_PHASE*가 짧아져 발사가 빨라진다 - 페이즈별 색은 rendering.js에서 지정.
+  BOSS_KEEPER_MAX_HP: 24,
+  BOSS_KEEPER_PHASE2_HP_RATIO: 0.66, // 이 비율 이하로 떨어지면 2페이즈
+  BOSS_KEEPER_PHASE3_HP_RATIO: 0.33, // 이 비율 이하로 떨어지면 3페이즈
+  BOSS_KEEPER_FIRE_INTERVAL_PHASE1: 1.6, // 일반 포탑(TURRET_FIRE_INTERVAL=2.2)보다 이미 빠름 - "공속 빠른" 보스 특성
+  BOSS_KEEPER_FIRE_INTERVAL_PHASE2: 1.1,
+  BOSS_KEEPER_FIRE_INTERVAL_PHASE3: 0.7,
+
   // --- 유령 NPC (순수 시각효과, 아무 판정에도 관여 안 함) ---
   // 플레이어가 마지막으로 이동한 방향의 반대쪽에서 살짝 거리를 두고 따라다니는 잔상 NPC.
   // (updateGhostNpc 참고 - 목표 위치를 지수 감쇠로 부드럽게 쫓아가서 순간이동처럼 보이지 않음)

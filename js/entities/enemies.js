@@ -122,6 +122,32 @@ function makeMimeA(x, y, opts = {}) {
   return { ...chaser, type: "mimeA", displayName: "떠돌이", hp: CONFIG.MIME_A_MAX_HP, maxHp: CONFIG.MIME_A_MAX_HP };
 }
 
+// 보스(keeperBoss, "지키는 자" - 2층 구역 4) - 포탑처럼 제자리에서 예고 후 발사하지만(updateKeeperBossAI,
+// 아래) 훨씬 크고 항상 스턴 면역이며, 감지/어그로/사거리 개념 자체가 없다 - 보스방은 카메라 고정 한
+// 화면짜리(zone.width/height === W/H)라 입장하는 순간 이미 시야 안이라 처음부터 대치 상태인 게 자연스러워서
+// (ROADMAP.md "몬스터 스폰 안전 거리" 규칙의 명시적 예외) makeStationaryRangeFields()를 안 쓰고 그냥
+// aggro:true로 시작한다. 체력 비율에 따라 1/2/3페이즈로 나뉘어 색+발사 주기가 바뀐다(updateBossPhase).
+function makeKeeperBoss(x, y, opts = {}) {
+  return {
+    id: enemyIdCounter++,
+    type: "keeperBoss",
+    spawnX: x, spawnY: y,
+    x, y, w: 100, h: 120,
+    hp: CONFIG.BOSS_KEEPER_MAX_HP,
+    maxHp: CONFIG.BOSS_KEEPER_MAX_HP,
+    phase: 1,
+    fireTimer: CONFIG.BOSS_KEEPER_FIRE_INTERVAL_PHASE1,
+    telegraphing: false,
+    alive: true,
+    flashTimer: 0,
+    hasBeenVisible: false,
+    stunnable: false, // 보스는 원본 스펙대로 항상 스턴 면역
+    hpFloor: opts.hpFloor ?? null,
+    timeSinceHit: Infinity,
+    aggro: true, // 보스방 입장 즉시 대치 상태 - 포탑/저격수와 달리 감지 범위로 판정하지 않음
+  };
+}
+
 // 적 B(mimeB, 1층 구역 4)는 여기 없다 - "배경의 일부"일 뿐 enemies[]에 들어가는 실제 몬스터가
 // 아니라서(사용자 확인: 체력 UI 없음, 죽을 수 없음, 봉쇄 벽 조건과도 무관해야 함) 순수 배경 장식으로
 // zone.ambientProps에 데이터만 두고 draw()가 따로 그린다(js/rendering.js의 drawMimeBProp 참고) -
@@ -129,7 +155,7 @@ function makeMimeA(x, y, opts = {}) {
 // 플래그 없이 구조적으로 보장된다.
 
 // 존 데이터의 enemySpawns[i].type을 실제 팩토리 함수로 매핑 - loadZone()이 이걸로 몬스터를 새로 만든다.
-const ENEMY_FACTORIES = { turret: makeTurret, sniper: makeSniper, chaser: makeChaser, mimeA: makeMimeA };
+const ENEMY_FACTORIES = { turret: makeTurret, sniper: makeSniper, chaser: makeChaser, mimeA: makeMimeA, keeperBoss: makeKeeperBoss };
 
 // 현재 존에 살아있는 몬스터 목록 - 존을 옮길 때마다(loadZone) 통째로 비우고 그 존의 enemySpawns로부터
 // 다시 채워진다. 예전 resetEnemies()는 삭제됨 - "리셋"이 아니라 "항상 새로 만든다"라서 이전 존/이전
@@ -236,6 +262,49 @@ function updateTurretAI(enemy, dt) {
       // 표류 유예(damagePlayer의 pendingDamage)도 안 타고 반격으로 격추도 안 됨 - updateProjectiles/
       // performDriftCounterAttack 참고. 반드시 몸으로 피해야 하는 투사체라는 뜻.
       unblockable: isSniper,
+    });
+  }
+}
+
+// 체력 비율로 페이즈를 갱신한다(§ 5 아트 제약 "1/2/3페이즈(색+공속 변화)"). 페이즈가 바뀌는 순간
+// fireTimer는 일부러 안 건드린다 - 이미 진행 중이던 발사 예고 시각효과와 실제 발사 시점이 어긋나
+// 보이지 않도록, 다음 발사부터 자연히 새 페이즈의 주기가 적용된다.
+function updateBossPhase(enemy) {
+  const ratio = enemy.hp / enemy.maxHp;
+  enemy.phase = ratio <= CONFIG.BOSS_KEEPER_PHASE3_HP_RATIO ? 3
+    : ratio <= CONFIG.BOSS_KEEPER_PHASE2_HP_RATIO ? 2
+    : 1;
+}
+function getBossFireInterval(enemy) {
+  if (enemy.phase === 3) return CONFIG.BOSS_KEEPER_FIRE_INTERVAL_PHASE3;
+  if (enemy.phase === 2) return CONFIG.BOSS_KEEPER_FIRE_INTERVAL_PHASE2;
+  return CONFIG.BOSS_KEEPER_FIRE_INTERVAL_PHASE1;
+}
+
+// 보스 AI - updateTurretAI와 같은 "제자리에서 예고 후 발사" 골격을 재사용하되, 감지/어그로/사거리
+// 판정 자체가 없다(makeKeeperBoss가 이미 aggro:true로 스폰하고, 보스방은 사거리 제한 없이 항상
+// 플레이어를 조준한다 - 화면 크기=맵 크기라 "사거리 밖"이라는 상황 자체가 없음). 페이즈에 따라
+// 발사 주기만 달라진다(updateBossPhase/getBossFireInterval, § 위).
+function updateKeeperBossAI(enemy, dt) {
+  updateBossPhase(enemy);
+  const ex = enemy.x + enemy.w / 2, ey = enemy.y + enemy.h / 2;
+  const px = player.x + player.w / 2, py = player.y + player.h / 2;
+  const dx = px - ex, dy = py - ey;
+
+  enemy.fireTimer -= dt;
+  enemy.telegraphing = enemy.fireTimer <= CONFIG.TURRET_TELEGRAPH_DURATION;
+
+  if (enemy.fireTimer <= 0) {
+    enemy.fireTimer = getBossFireInterval(enemy);
+    enemy.telegraphing = false;
+    const len = Math.hypot(dx, dy) || 1;
+    projectiles.push({
+      x: ex, y: ey,
+      vx: (dx / len) * CONFIG.PROJECTILE_SPEED,
+      vy: (dy / len) * CONFIG.PROJECTILE_SPEED,
+      r: CONFIG.PROJECTILE_RADIUS,
+      damage: CONFIG.PROJECTILE_DAMAGE,
+      unblockable: false,
     });
   }
 }
@@ -370,6 +439,7 @@ function updateEnemies(dt) {
     if (!enemy.hasBeenVisible) continue;
 
     if (enemy.type === "chaser" || enemy.type === "mimeA") updateChaserAI(enemy, dt);
+    else if (enemy.type === "keeperBoss") updateKeeperBossAI(enemy, dt);
     else updateTurretAI(enemy, dt);
   }
 }

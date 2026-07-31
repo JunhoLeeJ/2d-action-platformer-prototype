@@ -195,6 +195,21 @@ function makeSlowWalkTick(targetX, speed) {
   };
 }
 
+// 지속시간(duration, sec) 동안 매 프레임 0~1 진행률을 onProgress(t)로 전달하는 범용 custom 틱 -
+// makeSlowWalkTick/makeFallUntilGroundedTick과 같은 자리에 두는 이유도 같다(문 연출 전용이 아니라 어떤
+// 트리거의 sequence에서도 재사용할 범용 헬퍼). 그 둘과 달리 플레이어 위치를 직접 건드리지 않고 순수하게
+// 시간 경과 진행률만 알려준다 - 호출부가 onProgress 콜백 안에서 원하는 값(ambientProp의 필드 등)을
+// 직접 갱신한다. 2층 구역 4 보스 처치 컷신("문 쪽으로 돌아섬"/"파티클로 흩어짐" 진행률)에서 처음
+// 쓰이지만 정해진 시간에 걸쳐 값을 서서히 바꿔야 하는 다른 연출에도 재사용할 수 있게 여기 둔다.
+function makeTimedTick(duration, onProgress) {
+  let elapsed = 0;
+  return function timedTick(dt) {
+    elapsed += dt;
+    onProgress(clamp(elapsed / duration, 0, 1));
+    return elapsed >= duration;
+  };
+}
+
 // 오른쪽 문(doors.right)을 "걸어 들어가면 페이드 후 다음 존으로 이동"하는 트리거로 변환.
 // 문 자체는 zone def에 좌표만 갖고 있고, 실제 동작(페이드/존 전환)은 여기서 조립한다 - 그래야
 // 모든 존이 "문에 닿으면 이렇게 된다"를 똑같이 공유하고 존 데이터에는 목적지만 적으면 된다.

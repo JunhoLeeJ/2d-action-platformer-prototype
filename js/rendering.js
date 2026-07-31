@@ -193,6 +193,47 @@ function drawCheckpointPillarProp(prop) {
   ctx.restore();
 }
 
+// bossDefeated - 2층 구역 4 보스(keeperBoss) 처치 직후 재생되는 연출 전용 임시 ambientProp. 보스가
+// 죽으면 다른 몬스터와 동일하게 enemies[]에서 alive:false가 되어 더 이상 그려지지 않으므로, 처치
+// 컷신 동안 보여줄 "문 쪽으로 돌아섬 -> 파티클로 흩어짐" 연출은 f2z4-boss.js의 트리거가 이 오브젝트
+// 하나를 currentZone.ambientProps에 잠깐 끼워 넣어서(끝나면 직접 제거) 그린다 - crackMark/gyeolCaptured와
+// 같은 "컷신이 직접 currentZone.ambientProps를 조작" 패턴 재사용. turnProgress(0~1)/disperseProgress(0~1)는
+// 트리거의 custom 이벤트(zones.js의 makeTimedTick)가 매 프레임 직접 갱신 - 이 함수는 그 두 값을 읽어서
+// 그리기만 한다. fromDir(-1|1, prop 생성 시점에 한 번만 계산)은 "죽는 순간 플레이어가 보스 기준 어느
+// 쪽에 있었는지" - turnProgress가 1로 갈수록 항상 문(왼쪽, -1) 방향으로 수렴하므로, 컷신 도중 플레이어가
+// (releaseSpot으로) 이동해도 그 새 위치에 반응해 다시 홱 돌지 않도록 매 프레임 player.x를 다시 읽지
+// 않고 고정된 시작 방향에서만 보간한다.
+function drawBossDefeatedProp(prop) {
+  const cx = prop.x + prop.w / 2, cy = prop.y + prop.h / 2;
+  const alpha = 1 - prop.disperseProgress * 0.9; // 완전히 0으로 사라지진 않게(파티클이 마저 퍼지는 동안 살짝 남김)
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  drawRect(prop, "#6b4a3a"); // 빛이 바랜 몸통 - 살아있을 때의 페이즈 색보다 흐리되, alpha 페이드와 겹쳐도
+  // 배경(#2b2f3a)에 묻히지 않을 만큼은 밝게(너무 어두운 색을 쓰면 alpha가 채 옅어지기도 전에 이미 안
+  // 보여서 "돌아섬" 연출 자체가 눈에 안 띄는 문제가 있었음 - 실제 스크린샷 검증에서 발견)
+  const eyeDir = prop.fromDir + (-1 - prop.fromDir) * prop.turnProgress; // -1(문 방향)으로 서서히 수렴
+  ctx.fillStyle = "#fff59d";
+  ctx.beginPath();
+  ctx.arc(cx + eyeDir * prop.w * 0.3, prop.y + prop.h * 0.35, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  if (prop.disperseProgress > 0) {
+    const particleCount = 14;
+    const spread = 140 * prop.disperseProgress;
+    const particleAlpha = 1 - prop.disperseProgress;
+    ctx.save();
+    ctx.fillStyle = `rgba(255,183,77,${particleAlpha})`;
+    for (let i = 0; i < particleCount; i++) {
+      const angle = (i / particleCount) * Math.PI * 2;
+      const dist = spread * (0.6 + 0.4 * ((i % 3) / 2)); // 균일한 원이 아니라 결마다 거리가 살짝 다르게
+      const size = 4 * (1 - prop.disperseProgress);
+      ctx.fillRect(cx + Math.cos(angle) * dist - size / 2, cy + Math.sin(angle) * dist - size / 2, size, size);
+    }
+    ctx.restore();
+  }
+}
+
 // driftAbsorb - crackMark 흡수 애니메이션(cutscene.js의 "driftAbsorb" 이벤트가 driftAbsorbAnim을
 // 매 프레임 갱신, 여기서는 그리기만 함). fragmentObject와 같은 다이아몬드 반짝이 모양을 재사용하되,
 // 시작 위치에서 플레이어 중심까지 서서히 빨려들어가듯 이동하며 작아지고 옅어진다 - "[V] 표류를
@@ -315,6 +356,7 @@ function draw() {
     else if (prop.type === "crackMark") drawCrackMarkProp(prop);
     else if (prop.type === "gyeolCaptured") drawGyeolCapturedProp(prop);
     else if (prop.type === "checkpointPillar") drawCheckpointPillarProp(prop);
+    else if (prop.type === "bossDefeated") drawBossDefeatedProp(prop);
   }
 
   // 표류 흡수 애니메이션(cutscene.js "driftAbsorb" 이벤트) - 월드 좌표계라 이 안(카메라 translate)에서 그림
@@ -331,8 +373,14 @@ function draw() {
     // 이 합쳐진 플래그로 판정.
     const isChaserLike = isChaser || isMimeA;
     const isSniper = enemy.type === "sniper";
+    // 보스(keeperBoss) - 항상 스턴 면역(stunnable:false)이지만 다른 "면역" 몬스터처럼 보라색으로 묻히면
+    // 안 되므로(페이즈 색이 곧 체력 상태를 알려주는 정보라서) 아래 baseColor 판정에서 면역-보라 분기보다
+    // 먼저 체크한다. 페이즈에 따라 더 어둡고 위협적인 색으로 바뀜(§ 5 아트 제약 "1/2/3페이즈(색 변화)").
+    const isBoss = enemy.type === "keeperBoss";
     const isWarning = isChaserLike ? enemy.aiState === "windup" : enemy.telegraphing;
-    const baseColor = !enemy.stunnable
+    const baseColor = isBoss
+      ? (enemy.phase === 3 ? "#c62828" : enemy.phase === 2 ? "#8d3b1f" : "#5c3521")
+      : !enemy.stunnable
       ? "#8e44ad"
       : isMimeA ? "#7c6a53" // 배경 몬스터 - 다른 전투형 몬스터들과 안 겹치는 흙빛 톤
       : isChaser ? "#5c8a3a"
@@ -340,11 +388,13 @@ function draw() {
       : "#b23b3b";
     let color = enemy.flashTimer > 0 ? "#ffffff" : baseColor;
     // 공격 예고 중에는 빠르게 밝아졌다 어두워지는 색으로 경고 (체이서/mimeA는 근접 느낌의 붉은 계열,
-    // 저격수는 투사체와 짝을 맞춘 마젠타 계열로 구분 - 반드시 피해야 하는 예고라는 걸 색으로도 강조)
+    // 저격수는 투사체와 짝을 맞춘 마젠타 계열, 보스는 페이즈 색보다 한층 더 강렬한 주황-빨강으로 구분 -
+    // 반드시 피해야 하는 예고라는 걸 색으로도 강조)
     if (isWarning) {
       const pulse = (Math.sin(performance.now() / 60) + 1) / 2; // 0~1
       color = isChaserLike ? (pulse > 0.5 ? "#ff5252" : "#ff8a65")
         : isSniper ? (pulse > 0.5 ? "#f50057" : "#ff4081")
+        : isBoss ? (pulse > 0.5 ? "#ff3d00" : "#ff8a65")
         : (pulse > 0.5 ? "#ffb300" : "#ff6f3c");
     }
     drawRect(enemy, color);

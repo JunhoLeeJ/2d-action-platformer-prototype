@@ -141,11 +141,14 @@
       { id: GATE_CHECKPOINT_ID, x: gatePillarX, y: standingTopY, active: false },
     ],
 
-    // 왼쪽 문은 배경일 뿐(트리거 없음 - 뒤로 못 감), 오른쪽 문은 아직 다음 존이 없어서 null.
-    // 벽(0~40) 바로 뒤에 위치하도록 x=40으로 안쪽에 둠. y는 바닥에 딱 맞닿게(sunk 방지) groundY-doorH.
+    // 왼쪽 문은 배경일 뿐(트리거 없음 - 뒤로 못 감). 오른쪽 문은 2층 구역 4(보스전, f2z4_boss)로 연결 -
+    // 다른 모든 문과 동일한 관례(yMax/landingY 포함), 오른쪽 벽(post(3800)~+40) 바로 앞에 붙여 x를 잡는다.
     doors: {
       left: { x: 40, y: groundY - doorH, w: 40, h: doorH },
-      right: null,
+      right: {
+        x: post(3800) - 40, y: groundY - doorH, w: 40, h: doorH,
+        targetZoneId: "f2z4_boss", yMax: standingTopY + 25, landingY: groundY,
+      },
     },
 
     floors: [],
