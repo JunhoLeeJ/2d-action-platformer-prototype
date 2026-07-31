@@ -164,15 +164,20 @@ function drawFragmentObjectProp(prop) {
 }
 
 // checkpointPillar - 매듭 묶인 체크포인트 기둥(2층 구역 2에서 처음 등장, ROADMAP.md 참고). "켜짐"
-// 여부를 prop 데이터에 저장하지 않고 hasSeenTrigger(currentZone.id, prop.triggerId)를 매 프레임 직접
-// 확인한다 - door.crackWhen()과 같은 이유(ambientProps는 로드 시점에 캐싱되지만 활성화는 같은 방문
-// 도중 일어날 수 있어 그 순간 바로 반영되려면 매 프레임 다시 물어야 함). 켜지기 전엔 무채색 나무
-// 기둥, 켜진 뒤엔 매듭 부분만 청록색으로 은은하게 펄스 - crackMark/fragmentObject/driftAbsorb와 같은
-// 파란빛 팔레트(#7fd3ff)를 재사용해 "이 게임에서 빛나는 것은 전부 이 색"이라는 시각적 일관성을 유지.
+// 여부를 prop 데이터에 저장하지 않고 currentZone.checkpoints에서 prop.checkpointId와 같은 id를 찾아
+// 그 cp.active를 매 프레임 직접 확인한다 - door.crackWhen()과 같은 이유(ambientProps는 로드 시점에
+// 캐싱되지만 활성화는 같은 방문 도중 일어날 수 있어 그 순간 바로 반영되려면 매 프레임 다시 물어야 함).
+// hasSeenTrigger("한 번이라도 발동했는지")가 아니라 cp.active("지금 이 순간의 실제 리스폰 지점인지")를
+// 보는 이유 - 리스폰 지점은 항상 하나뿐이어야 하므로(사용자 요청), 새 체크포인트를 활성화하면
+// activateCheckpoint()(js/engine/checkpoint.js)가 다른 모든 체크포인트의 active를 함께 꺼준다 - 그래야
+// 예전에 켰던 기둥이 계속 빛나 보이는 일 없이 지금 리스폰될 곳 딱 하나만 빛난다. 켜지기 전엔 무채색
+// 나무 기둥, 켜진 뒤엔 매듭 부분만 청록색으로 은은하게 펄스 - crackMark/fragmentObject/driftAbsorb와
+// 같은 파란빛 팔레트(#7fd3ff)를 재사용해 "이 게임에서 빛나는 것은 전부 이 색"이라는 시각적 일관성을 유지.
 function drawCheckpointPillarProp(prop) {
   drawRect(prop, "#5a4632"); // 기둥 본체 - 무채색 나무
   const knotCx = prop.x + prop.w / 2, knotCy = prop.y + prop.h * 0.3, knotR = prop.w * 0.55;
-  const lit = hasSeenTrigger(currentZone.id, prop.triggerId);
+  const cpDef = currentZone.checkpoints.find((cp) => cp.id === prop.checkpointId);
+  const lit = !!(cpDef && cpDef.active);
   ctx.save();
   if (lit) {
     const pulse = (Math.sin(performance.now() / 500 + prop.x) + 1) / 2;
